@@ -123,6 +123,7 @@ def seed_databases():
             total_price  DECIMAL(14,2) NOT NULL,
             sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,9.99*10);
     """)
     sql_cnx.commit()
     mcur.close();  sql_cnx.close()
