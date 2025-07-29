@@ -522,6 +522,7 @@ async def sales_crud(
     elif operation == "read":
         mysql = get_mysql_conn()
         mcur  = mysql.cursor()  
+        # Removed the redundant SELECT * FROM Sales; query
         sql = """
         SELECT  s.Id,
                 c.FirstName, -- Changed from c.Name
