@@ -86,18 +86,17 @@ def seed_databases():
     MYSQL_DB = must_get_clean("MYSQL_DB")
 
     # 1-a  create the schema if it doesn’t exist (connect with NO default DB)
-    root = get_mysql_conn(db=None)
+    root = get_mysql_conn(db=None, autocommit=False) # Autocommit False for explicit commit
     rcur = root.cursor()
     rcur.execute(f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DB}`;")
-    root.commit()
+    root.commit() # Commit after 1st command
     rcur.close();  root.close()
 
-    # 1-b  connect inside the target DB, with autocommit OFF for seeding transaction
-    sql_cnx = get_mysql_conn(autocommit=False) # Set autocommit to False for this connection
+    # 1-b  connect inside the target DB, with autocommit OFF for seeding transactions
+    # Customers Table Operations
+    sql_cnx = get_mysql_conn(autocommit=False)
     mcur = sql_cnx.cursor()
-
-    # Customers - MODIFIED: Added FirstName, LastName, Email is nullable, added Null Email customer
-    mcur.execute("DROP TABLE IF EXISTS Customers;")
+    mcur.execute("DROP TABLE IF EXISTS Customers;") # Command 1
     mcur.execute("""
         CREATE TABLE Customers (
             Id        INT AUTO_INCREMENT PRIMARY KEY,
@@ -106,17 +105,25 @@ def seed_databases():
             Email     VARCHAR(100), -- Made nullable
             CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-    """)
-    # Separated INSERT statement for Customers table
-    mcur.executemany(
+    """) # Command 2
+    sql_cnx.commit() # Commit after 2 commands
+    mcur.close(); sql_cnx.close() # Close connection
+
+    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
+    mcur = sql_cnx.cursor()
+    mcur.executemany( # Command 1 (executemany is one command)
         "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
         [("Alice", "Smith", "alice@example.com"),
          ("Bob", "Johnson", "bob@example.com"),
          ("Null", "User", None)] # Customer with NULL email for demonstration
     )
+    sql_cnx.commit() # Commit after 1 command (odd number)
+    mcur.close(); sql_cnx.close() # Close connection
 
-    # Sales (starts empty, but add some for initial data) - MODIFIED to add sample sales
-    mcur.execute("DROP TABLE IF EXISTS Sales;")
+    # Sales Table Operations
+    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
+    mcur = sql_cnx.cursor()
+    mcur.execute("DROP TABLE IF EXISTS Sales;") # Command 1
     mcur.execute("""
         CREATE TABLE Sales (
             Id           INT AUTO_INCREMENT PRIMARY KEY,
@@ -127,28 +134,35 @@ def seed_databases():
             total_price  DECIMAL(14,2) NOT NULL,
             sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-    """)
-    # Separated INSERT statements for Sales table
-    mcur.execute("""
+    """) # Command 2
+    sql_cnx.commit() # Commit after 2 commands
+    mcur.close(); sql_cnx.close() # Close connection
+
+    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
+    mcur = sql_cnx.cursor()
+    mcur.execute(""" # Command 1
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
     """)
-    mcur.execute("""
+    mcur.execute(""" # Command 2
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
     """)
-    mcur.execute("""
+    sql_cnx.commit() # Commit after 2 commands
+    mcur.close(); sql_cnx.close() # Close connection
+
+    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
+    mcur = sql_cnx.cursor()
+    mcur.execute(""" # Command 1
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
     """)
-    sql_cnx.commit() # Commit all MySQL changes at once
-    mcur.close();  sql_cnx.close()
+    sql_cnx.commit() # Commit after 1 command (odd number)
+    mcur.close(); sql_cnx.close() # Close connection
 
     # ──────────────────────────────────────────────────────────────
     # 2 ─ PostgreSQL – create / seed products
     # ──────────────────────────────────────────────────────────────
-    pg_cnx = get_pg_conn()
-    pg_cnx.autocommit = True          # simplifies DDL
+    pg_cnx = get_pg_conn() # Autocommit is True for PG, so no explicit commit needed
     pcur = pg_cnx.cursor()
-
-    pcur.execute("DROP TABLE IF EXISTS products;")
+    pcur.execute("DROP TABLE IF EXISTS products;") # Command 1
     pcur.execute("""
         CREATE TABLE products (
             id            SERIAL PRIMARY KEY,
@@ -158,8 +172,12 @@ def seed_databases():
             sales_amount  NUMERIC(12,2)  NOT NULL DEFAULT 0,
             description   TEXT
         );
-    """)
-    pcur.executemany(
+    """) # Command 2
+    pcur.close();  pg_cnx.close() # Close connection
+
+    pg_cnx = get_pg_conn() # Reopen connection
+    pcur = pg_cnx.cursor()
+    pcur.executemany( # Command 1 (executemany is one command)
         """
         INSERT INTO products (name, price, quantity, sales_amount, description)
         VALUES (%s, %s, %s, %s, %s);
@@ -170,19 +188,16 @@ def seed_databases():
             ("Doodad", 5.00, 0, 0, None), # Product with NULL description for demonstration
         ],
     )
-
-    # 2-b  pull the product master so we can mirror it
-    pcur.execute("SELECT id, name, price, quantity, sales_amount FROM products;")
+    pcur.execute("SELECT id, name, price, quantity, sales_amount FROM products;") # Command 2
     product_rows = pcur.fetchall()    # e.g. [(1, 'Widget', 9.99), (2, 'Gadget', 14.99)]
-    pcur.close();  pg_cnx.close()
+    pcur.close();  pg_cnx.close() # Close connection
 
     # ──────────────────────────────────────────────────────────────
     # 3 ─ Mirror products into MySQL  (ProductsCache)
     # ──────────────────────────────────────────────────────────────
     sql_cnx = get_mysql_conn(autocommit=False) # Set autocommit to False for this connection
     mcur = sql_cnx.cursor()
-
-    mcur.execute("DROP TABLE IF EXISTS ProductsCache;")
+    mcur.execute("DROP TABLE IF EXISTS ProductsCache;") # Command 1
     mcur.execute("""
         CREATE TABLE ProductsCache (
             id    INT PRIMARY KEY,
@@ -191,16 +206,21 @@ def seed_databases():
             quantity     INT           NOT NULL DEFAULT 0,
             sales_amount DECIMAL(14,2) NOT NULL DEFAULT 0
         );
-    """)
-    mcur.executemany(
+    """) # Command 2
+    sql_cnx.commit() # Commit after 2 commands
+    mcur.close();  sql_cnx.close() # Close connection
+
+    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
+    mcur = sql_cnx.cursor()
+    mcur.executemany( # Command 1
     """
     INSERT INTO ProductsCache
            (id, name, price, quantity, sales_amount)
     VALUES (%s, %s, %s, %s, %s);
     """
     , product_rows)
-    sql_cnx.commit() # Commit ProductsCache changes
-    mcur.close();  sql_cnx.close()
+    sql_cnx.commit() # Commit after 1 command (odd number)
+    mcur.close();  sql_cnx.close() # Close connection
 
     
 
