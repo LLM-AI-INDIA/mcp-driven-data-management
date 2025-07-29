@@ -86,141 +86,249 @@ def seed_databases():
     MYSQL_DB = must_get_clean("MYSQL_DB")
 
     # 1-a  create the schema if it doesn’t exist (connect with NO default DB)
-    root = get_mysql_conn(db=None, autocommit=False) # Autocommit False for explicit commit
-    rcur = root.cursor()
-    rcur.execute(f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DB}`;")
-    root.commit() # Commit after 1st command
-    rcur.close();  root.close()
+    # Each operation gets its own connection and cursor to prevent "Commands out of sync"
+    try:
+        root_cnx = get_mysql_conn(db=None, autocommit=False)
+        rcur = root_cnx.cursor()
+        rcur.execute(f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DB}`;")
+        root_cnx.commit()
+    except Exception as e:
+        print(f"Error creating database {MYSQL_DB}: {e}")
+    finally:
+        if 'rcur' in locals() and rcur: rcur.close()
+        if 'root_cnx' in locals() and root_cnx and root_cnx.is_connected(): root_cnx.close()
+
 
     # 1-b  connect inside the target DB, with autocommit OFF for seeding transactions
     # Customers Table Operations
-    sql_cnx = get_mysql_conn(autocommit=False)
-    mcur = sql_cnx.cursor()
-    mcur.execute("DROP TABLE IF EXISTS Customers;") # Command 1
-    mcur.execute("""
-        CREATE TABLE Customers (
-            Id        INT AUTO_INCREMENT PRIMARY KEY,
-            FirstName VARCHAR(50) NOT NULL,
-            LastName  VARCHAR(50) NOT NULL,
-            Email     VARCHAR(100), -- Made nullable
-            CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """) # Command 2
-    sql_cnx.commit() # Commit after 2 commands
-    mcur.close(); sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("DROP TABLE IF EXISTS Customers;")
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error dropping Customers table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
 
-    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
-    mcur = sql_cnx.cursor()
-    mcur.executemany( # Command 1 (executemany is one command)
-        "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
-        [("Alice", "Smith", "alice@example.com"),
-         ("Bob", "Johnson", "bob@example.com"),
-         ("Null", "User", None)] # Customer with NULL email for demonstration
-    )
-    sql_cnx.commit() # Commit after 1 command (odd number)
-    mcur.close(); sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("""
+            CREATE TABLE Customers (
+                Id        INT AUTO_INCREMENT PRIMARY KEY,
+                FirstName VARCHAR(50) NOT NULL,
+                LastName  VARCHAR(50) NOT NULL,
+                Email     VARCHAR(100), -- Made nullable
+                CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error creating Customers table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
+
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.executemany(
+            "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
+            [("Alice", "Smith", "alice@example.com"),
+             ("Bob", "Johnson", "bob@example.com"),
+             ("Null", "User", None)] # Customer with NULL email for demonstration
+        )
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error inserting into Customers table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
 
     # Sales Table Operations
-    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
-    mcur = sql_cnx.cursor()
-    mcur.execute("DROP TABLE IF EXISTS Sales;") # Command 1
-    mcur.execute("""
-        CREATE TABLE Sales (
-            Id           INT AUTO_INCREMENT PRIMARY KEY,
-            customer_id  INT NOT NULL,
-            product_id   INT NOT NULL,
-            quantity     INT NOT NULL,
-            unit_price   DECIMAL(12,2) NOT NULL,
-            total_price  DECIMAL(14,2) NOT NULL,
-            sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """) # Command 2
-    sql_cnx.commit() # Commit after 2 commands
-    mcur.close(); sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("DROP TABLE IF EXISTS Sales;")
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error dropping Sales table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
 
-    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
-    mcur = sql_cnx.cursor()
-    mcur.execute(""" # Command 1
-        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
-    """)
-    mcur.execute(""" # Command 2
-        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
-    """)
-    sql_cnx.commit() # Commit after 2 commands
-    mcur.close(); sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("""
+            CREATE TABLE Sales (
+                Id           INT AUTO_INCREMENT PRIMARY KEY,
+                customer_id  INT NOT NULL,
+                product_id   INT NOT NULL,
+                quantity     INT NOT NULL,
+                unit_price   DECIMAL(12,2) NOT NULL,
+                total_price  DECIMAL(14,2) NOT NULL,
+                sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error creating Sales table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
 
-    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
-    mcur = sql_cnx.cursor()
-    mcur.execute(""" # Command 1
-        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
-    """)
-    sql_cnx.commit() # Commit after 1 command (odd number)
-    mcur.close(); sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("""
+            INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
+        """)
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error inserting sale 1: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
+
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("""
+            INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
+        """)
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error inserting sale 2: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
+
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("""
+            INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
+        """)
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error inserting sale 3: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
+
 
     # ──────────────────────────────────────────────────────────────
     # 2 ─ PostgreSQL – create / seed products
     # ──────────────────────────────────────────────────────────────
-    pg_cnx = get_pg_conn() # Autocommit is True for PG, so no explicit commit needed
-    pcur = pg_cnx.cursor()
-    pcur.execute("DROP TABLE IF EXISTS products;") # Command 1
-    pcur.execute("""
-        CREATE TABLE products (
-            id            SERIAL PRIMARY KEY,
-            name          TEXT           NOT NULL,
-            price         NUMERIC(10,4)  NOT NULL,
-            quantity      INTEGER        NOT NULL DEFAULT 0,
-            sales_amount  NUMERIC(12,2)  NOT NULL DEFAULT 0,
-            description   TEXT
-        );
-    """) # Command 2
-    pcur.close();  pg_cnx.close() # Close connection
+    # PostgreSQL connections use autocommit=True by default in get_pg_conn,
+    # so separate commits are not strictly needed here, but closing/reopening
+    # connections after each major step for consistency with MySQL pattern.
+    try:
+        pg_cnx = get_pg_conn()
+        pcur = pg_cnx.cursor()
+        pcur.execute("DROP TABLE IF EXISTS products;")
+    except Exception as e:
+        print(f"Error dropping products table (PG): {e}")
+    finally:
+        if 'pcur' in locals() and pcur: pcur.close()
+        if 'pg_cnx' in locals() and pg_cnx and pg_cnx.is_connected(): pg_cnx.close()
 
-    pg_cnx = get_pg_conn() # Reopen connection
-    pcur = pg_cnx.cursor()
-    pcur.executemany( # Command 1 (executemany is one command)
-        """
-        INSERT INTO products (name, price, quantity, sales_amount, description)
-        VALUES (%s, %s, %s, %s, %s);
-        """,
-        [
-            ("Widget",  9.99, 25, 9.99 * 25, "A standard widget."),
-            ("Gadget", 14.99, 10, 14.99 * 10, "A useful gadget."),
-            ("Doodad", 5.00, 0, 0, None), # Product with NULL description for demonstration
-        ],
-    )
-    pcur.execute("SELECT id, name, price, quantity, sales_amount FROM products;") # Command 2
-    product_rows = pcur.fetchall()    # e.g. [(1, 'Widget', 9.99), (2, 'Gadget', 14.99)]
-    pcur.close();  pg_cnx.close() # Close connection
+    try:
+        pg_cnx = get_pg_conn()
+        pcur = pg_cnx.cursor()
+        pcur.execute("""
+            CREATE TABLE products (
+                id            SERIAL PRIMARY KEY,
+                name          TEXT           NOT NULL,
+                price         NUMERIC(10,4)  NOT NULL,
+                quantity      INTEGER        NOT NULL DEFAULT 0,
+                sales_amount  NUMERIC(12,2)  NOT NULL DEFAULT 0,
+                description   TEXT
+            );
+        """)
+    except Exception as e:
+        print(f"Error creating products table (PG): {e}")
+    finally:
+        if 'pcur' in locals() and pcur: pcur.close()
+        if 'pg_cnx' in locals() and pg_cnx and pg_cnx.is_connected(): pg_cnx.close()
+
+    product_rows = []
+    try:
+        pg_cnx = get_pg_conn()
+        pcur = pg_cnx.cursor()
+        pcur.executemany(
+            """
+            INSERT INTO products (name, price, quantity, sales_amount, description)
+            VALUES (%s, %s, %s, %s, %s);
+            """,
+            [
+                ("Widget",  9.99, 25, 9.99 * 25, "A standard widget."),
+                ("Gadget", 14.99, 10, 14.99 * 10, "A useful gadget."),
+                ("Doodad", 5.00, 0, 0, None), # Product with NULL description for demonstration
+            ],
+        )
+        pcur.execute("SELECT id, name, price, quantity, sales_amount FROM products;")
+        product_rows = pcur.fetchall()
+    except Exception as e:
+        print(f"Error inserting/fetching products (PG): {e}")
+    finally:
+        if 'pcur' in locals() and pcur: pcur.close()
+        if 'pg_cnx' in locals() and pg_cnx and pg_cnx.is_connected(): pg_cnx.close()
+
 
     # ──────────────────────────────────────────────────────────────
     # 3 ─ Mirror products into MySQL  (ProductsCache)
     # ──────────────────────────────────────────────────────────────
-    sql_cnx = get_mysql_conn(autocommit=False) # Set autocommit to False for this connection
-    mcur = sql_cnx.cursor()
-    mcur.execute("DROP TABLE IF EXISTS ProductsCache;") # Command 1
-    mcur.execute("""
-        CREATE TABLE ProductsCache (
-            id    INT PRIMARY KEY,
-            name  VARCHAR(100) NOT NULL,
-            price DECIMAL(12,4) NOT NULL,
-            quantity     INT           NOT NULL DEFAULT 0,
-            sales_amount DECIMAL(14,2) NOT NULL DEFAULT 0
-        );
-    """) # Command 2
-    sql_cnx.commit() # Commit after 2 commands
-    mcur.close();  sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("DROP TABLE IF EXISTS ProductsCache;")
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error dropping ProductsCache table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
 
-    sql_cnx = get_mysql_conn(autocommit=False) # Reopen connection
-    mcur = sql_cnx.cursor()
-    mcur.executemany( # Command 1
-    """
-    INSERT INTO ProductsCache
-           (id, name, price, quantity, sales_amount)
-    VALUES (%s, %s, %s, %s, %s);
-    """
-    , product_rows)
-    sql_cnx.commit() # Commit after 1 command (odd number)
-    mcur.close();  sql_cnx.close() # Close connection
+    try:
+        sql_cnx = get_mysql_conn(autocommit=False)
+        mcur = sql_cnx.cursor()
+        mcur.execute("""
+            CREATE TABLE ProductsCache (
+                id    INT PRIMARY KEY,
+                name  VARCHAR(100) NOT NULL,
+                price DECIMAL(12,4) NOT NULL,
+                quantity     INT           NOT NULL DEFAULT 0,
+                sales_amount DECIMAL(14,2) NOT NULL DEFAULT 0
+            );
+        """)
+        sql_cnx.commit()
+    except Exception as e:
+        print(f"Error creating ProductsCache table: {e}")
+    finally:
+        if 'mcur' in locals() and mcur: mcur.close()
+        if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
+
+    if product_rows: # Only insert if products were successfully fetched
+        try:
+            sql_cnx = get_mysql_conn(autocommit=False)
+            mcur = sql_cnx.cursor()
+            mcur.executemany(
+            """
+            INSERT INTO ProductsCache
+                   (id, name, price, quantity, sales_amount)
+            VALUES (%s, %s, %s, %s, %s);
+            """
+            , product_rows)
+            sql_cnx.commit()
+        except Exception as e:
+            print(f"Error inserting into ProductsCache table: {e}")
+        finally:
+            if 'mcur' in locals() and mcur: mcur.close()
+            if 'sql_cnx' in locals() and sql_cnx and sql_cnx.is_connected(): sql_cnx.close()
 
     
 
