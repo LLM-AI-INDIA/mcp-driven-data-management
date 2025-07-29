@@ -31,7 +31,7 @@ MYSQL_USER = must_get_clean("MYSQL_USER")
 MYSQL_PASSWORD = must_get_clean("MYSQL_PASSWORD")
 MYSQL_DB = must_get_clean("MYSQL_DB")
 
-def get_mysql_conn(db: str | None = MYSQL_DB):
+def get_mysql_conn(db: str | None = MYSQL_DB, autocommit: bool = True): # Added autocommit parameter
     """If db is None we connect to the server only (needed to CREATE DATABASE)."""
     return mysql.connector.connect(
         host=MYSQL_HOST,
@@ -40,7 +40,7 @@ def get_mysql_conn(db: str | None = MYSQL_DB):
         password=MYSQL_PASSWORD,
         database=db,
         ssl_disabled=False,          # Aiven requires TLS; keep this False
-        autocommit=True,
+        autocommit=autocommit, # Use the passed autocommit value
     )
 
 
@@ -91,8 +91,8 @@ def seed_databases():
     rcur.execute(f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DB}`;")
     rcur.close();  root.close()
 
-    # 1-b  connect inside the target DB
-    sql_cnx = get_mysql_conn()
+    # 1-b  connect inside the target DB, with autocommit OFF for seeding transaction
+    sql_cnx = get_mysql_conn(autocommit=False) # Set autocommit to False for this connection
     mcur = sql_cnx.cursor()
 
     # Customers - MODIFIED: Added FirstName, LastName, Email is nullable, added Null Email customer
@@ -106,12 +106,8 @@ def seed_databases():
             CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    mcur.close();sql_cnx.close()
-
-    # 1-c new connection
-    sql_cnx_1 = get_mysql_conn()
-    tcur = sql_cnx_1.cursor()
-    tcur.executemany(
+    # Separated INSERT statement for Customers table
+    mcur.executemany(
         "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
         [("Alice", "Smith", "alice@example.com"),
          ("Bob", "Johnson", "bob@example.com"),
@@ -119,8 +115,8 @@ def seed_databases():
     )
 
     # Sales (starts empty, but add some for initial data) - MODIFIED to add sample sales
-    tcur.execute("DROP TABLE IF EXISTS Sales;")
-    tcur.execute("""
+    mcur.execute("DROP TABLE IF EXISTS Sales;")
+    mcur.execute("""
         CREATE TABLE Sales (
             Id           INT AUTO_INCREMENT PRIMARY KEY,
             customer_id  INT NOT NULL,
@@ -131,18 +127,18 @@ def seed_databases():
             sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    # Separated INSERT statement for Sales table to avoid "Commands out of sync" error
-    tcur.execute("""
+    # Separated INSERT statements for Sales table
+    mcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
     """)
-    tcur.execute("""
+    mcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
     """)
-    tcur.execute("""
+    mcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
     """)
-    sql_cnx_1.commit()
-    tcur.close();  sql_cnx_1.close()
+    sql_cnx.commit() # Commit all MySQL changes at once
+    mcur.close();  sql_cnx.close()
 
     # ──────────────────────────────────────────────────────────────
     # 2 ─ PostgreSQL – create / seed products
@@ -182,7 +178,7 @@ def seed_databases():
     # ──────────────────────────────────────────────────────────────
     # 3 ─ Mirror products into MySQL  (ProductsCache)
     # ──────────────────────────────────────────────────────────────
-    sql_cnx = get_mysql_conn()
+    sql_cnx = get_mysql_conn(autocommit=False) # Set autocommit to False for this connection
     mcur = sql_cnx.cursor()
 
     mcur.execute("DROP TABLE IF EXISTS ProductsCache;")
@@ -202,7 +198,7 @@ def seed_databases():
     VALUES (%s, %s, %s, %s, %s);
     """
     , product_rows)
-    sql_cnx.commit()
+    sql_cnx.commit() # Commit ProductsCache changes
     mcur.close();  sql_cnx.close()
 
     
@@ -443,7 +439,8 @@ async def sales_crud(
     display_format: str = None # NEW PARAMETER for formatting control
 ) -> Any:
     # 1) Resolve IDs & prices
-    mysql = get_mysql_conn();    mcur = mysql.cursor()
+    mysql = get_mysql_conn()    # Use default autocommit=True for tools
+    mcur = mysql.cursor()
     pg    = get_pg_conn();       pcur = pg.cursor()
 
     # Fetch customer_id if name given
