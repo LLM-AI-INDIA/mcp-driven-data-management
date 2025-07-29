@@ -4,7 +4,8 @@ import streamlit as st
 import base64
 from io import BytesIO
 from PIL import Image
-from openai import OpenAI
+# from openai import OpenAI # REMOVED: OpenAI import
+from groq import Groq # NEW: Groq import
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
@@ -297,13 +298,14 @@ with st.sidebar:
         # Dynamically choose default options for other selects
         # Option lists
         protocol_options = ["", "MCP Protocol", "A2A Protocol"]
-        llm_options = ["", "GPT-4o", "GPT-4", "Claude 3 Sonnet", "Claude 3 Opus"]
+        # MODIFIED: Added Groq models
+        llm_options = ["", "GPT-4o", "GPT-4", "Claude 3 Sonnet", "Claude 3 Opus", "Groq - Llama3-8b-8192", "Groq - Llama3-70b-8192", "Groq - Mixtral-8x7b-32768"]
 
         # Logic to auto-select defaults if MCP Application is chosen
         protocol_index = protocol_options.index(
             "MCP Protocol") if application == "MCP Application" else protocol_options.index(
             st.session_state.get("protocol_select", ""))
-        llm_index = llm_options.index("GPT-4o") if application == "MCP Application" else llm_options.index(
+        llm_index = llm_options.index("Groq - Llama3-8b-8192") if application == "MCP Application" else llm_options.index( # Default to Groq
             st.session_state.get("llm_select", ""))
 
         protocol = st.selectbox(
@@ -457,7 +459,7 @@ def _clean_json(raw: str) -> str:
 
 
 # ========== NEW LLM RESPONSE GENERATOR ==========
-def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
+def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str, llm_model: str) -> str:
     """Generate LLM response based on operation result with context"""
 
     # Prepare context for LLM
@@ -486,19 +488,33 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     """
 
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.7,
-            max_tokens=100
-        )
+        if llm_model.startswith("Groq"):
+            groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
+            response = groq_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=100
+            )
+        else: # Fallback to OpenAI if not Groq (or other future LLMs)
+            openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = openai_client.chat.completions.create(
+                model=llm_model.lower().replace(" ", "-"), # Adjust model name for OpenAI
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=100
+            )
         return response.choices[0].message.content.strip()
     except Exception as e:
         # Fallback response if LLM call fails
+        st.error(f"LLM Response Generation Error: {e}") # Display error for debugging
         if action == "read":
             return f"Successfully retrieved data from {tool}."
         elif action == "create":
@@ -513,7 +529,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
             return f"Operation completed successfully using {tool}."
 
 
-def parse_user_query(query: str, available_tools: dict) -> dict:
+def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict: # Added llm_model
     """Parse user query with fully dynamic tool selection based on tool descriptions"""
 
     if not available_tools:
@@ -589,9 +605,15 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     prompt = f"User query: \"{query}\"\n\nAs a sales agent, analyze the query and select the most appropriate tool based on the descriptions above. Consider the business context and data relationships. Respond with JSON only."
 
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        resp = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+        if llm_model.startswith("Groq"):
+            client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
+        else:
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            model_name = llm_model.lower().replace(" ", "-") # Adjust model name for OpenAI
+
+        resp = client.chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -619,6 +641,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     except Exception as e:
         # Fallback response if LLM call fails
+        st.error(f"LLM Parsing Error: {e}") # Display error for debugging
         return {
             "tool": list(available_tools.keys())[0] if available_tools else None,
             "action": "read",
@@ -741,7 +764,7 @@ def extract_price(text):
     return float(match.group(0)) if match else None
 
 
-def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str) -> str:
+def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str, llm_model: str) -> str: # Added llm_model
     """Generate LLM-based table description from JSON response data"""
 
     # Sample first few rows for context (don't send all data to LLM)
@@ -773,9 +796,15 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
     """
 
     try:
-        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+        if llm_model.startswith("Groq"):
+            client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+            model_name = llm_model.split(" - ")[1] # Extract model name
+        else:
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            model_name = llm_model.lower().replace(" ", "-") # Adjust model name
+
+        response = client.chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
@@ -785,6 +814,7 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
+        st.error(f"LLM Table Description Error: {e}") # Display error for debugging
         return f"Retrieved {len(df)} records from the database."
 
 
@@ -793,7 +823,8 @@ if application == "MCP Application":
     user_avatar_url = "[https://cdn-icons-png.flaticon.com/512/1946/1946429.png](https://cdn-icons-png.flaticon.com/512/1946/1946429.png)"
     agent_avatar_url = "[https://cdn-icons-png.flaticon.com/512/4712/4712039.png](https://cdn-icons-png.flaticon.com/512/4712/4712039.png)"
 
-    openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    # Removed direct OpenAI client init here, moved to functions
+    # openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) 
     MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
     st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
 
@@ -888,6 +919,7 @@ if application == "MCP Application":
             action = msg.get("action", "")
             tool = msg.get("tool", "")
             user_query = msg.get("user_query", "")
+            current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") # Get selected LLM model
 
             with st.expander("Details"):
                 if "request" in msg:
@@ -903,8 +935,8 @@ if application == "MCP Application":
                 else:
                     st.code(content["result"])
 
-            # Generate LLM response for the operation
-            llm_response = generate_llm_response(content, action, tool, user_query)
+            # Generate LLM response for the operation, passing the selected LLM model
+            llm_response = generate_llm_response(content, action, tool, user_query, current_llm_model)
 
             st.markdown(
                 f"""
@@ -1009,12 +1041,15 @@ if application == "MCP Application":
     if send_clicked and user_query_input:
         user_query = user_query_input
         user_steps = []
+        current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") # Get selected LLM model
+
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
             if not enabled_tools:
                 raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
 
-            p = parse_user_query(user_query, st.session_state.available_tools)
+            # Pass the selected LLM model to parse_user_query
+            p = parse_user_query(user_query, st.session_state.available_tools, current_llm_model)
             tool = p.get("tool")
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
@@ -1076,38 +1111,6 @@ if application == "MCP Application":
                     if possible_email:
                         args["new_email"] = possible_email
                         p["args"] = args
-
-            if tool == "sqlserver_crud" and action == "delete":
-                if "customer_id" not in args and "name" in args:
-                    customer_full_name = args.pop("name")
-                    name_parts = customer_full_name.split(maxsplit=1)
-                    first_name = name_parts[0]
-                    last_name = name_parts[1] if len(name_parts) > 1 else ""
-
-                    read_args = {"first_name": first_name, "last_name": last_name}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result and read_result["result"]:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("FirstName", "").lower() == first_name.lower() and
-                                   r.get("LastName", "").lower() == last_name.lower()]
-                        if matches:
-                            args["customer_id"] = matches[0]["Id"]
-                            p["args"] = args
-                if "customer_id" not in args:
-                    extracted_name = extract_name(user_query) # This extracts full name
-                    if extracted_name:
-                        name_parts = extracted_name.split(maxsplit=1)
-                        first_name = name_parts[0]
-                        last_name = name_parts[1] if len(name_parts) > 1 else ""
-                        read_args = {"first_name": first_name, "last_name": last_name}
-                        read_result = call_mcp_tool(tool, "read", read_args)
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            matches = [r for r in read_result["result"] if
-                                       r.get("FirstName", "").lower() == first_name.lower() and
-                                       r.get("LastName", "").lower() == last_name.lower()]
-                            if matches:
-                                args["customer_id"] = matches[0]["Id"]
-                                p["args"] = args
 
             # PostgreSQL: update by name
             if tool == "postgresql_crud" and action == "update":
