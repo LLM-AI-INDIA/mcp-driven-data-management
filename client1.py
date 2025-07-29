@@ -336,6 +336,20 @@ with st.sidebar:
             index=server_tools_index
         )
 
+        # NEW: Dropdown for display options
+        display_options = [
+            "Default Formatting",
+            "Data Format Conversion",
+            "Decimal Value Formatting",
+            "String Concatenation",
+            "Null Value Removal/Handling"
+        ]
+        selected_display_option = st.selectbox(
+            "Display Options",
+            display_options,
+            key="display_option_select"
+        )
+
         # REMOVED: Refresh Tools button from sidebar
 
         st.button("Clear/Reset", key="clear_button")
@@ -438,7 +452,7 @@ if "chat_input_box" not in st.session_state:
 
 # ========== HELPER FUNCTIONS ==========
 def _clean_json(raw: str) -> str:
-    fences = re.findall(r"``````", raw, re.DOTALL)
+    fences = re.findall(r"```", raw, re.DOTALL)
     return fences[0].strip() if fences else raw.strip()
 
 
@@ -638,13 +652,62 @@ def format_natural(data) -> str:
         lines = []
         for i, item in enumerate(data, 1):
             if isinstance(item, dict):
-                parts = [f"{k} {v}" for k, v in item.items()]
+                # Improved formatting for dict items, especially for new concatenated fields
+                parts = []
+                for k, v in item.items():
+                    # Skip raw fields if a more formatted/concatenated version is present
+                    if k == "customer_first_name" or k == "customer_last_name":
+                        if "customer_full_name" in item: continue
+                    if k == "product_description_raw" and "product_full_description" in item:
+                        continue
+                    
+                    # Add formatted parts
+                    if k == "customer_full_name" and v:
+                        parts.append(f"Customer: {v}")
+                    elif k == "product_full_description" and v:
+                        parts.append(f"Product: {v}")
+                    elif k == "sale_summary" and v:
+                        parts.append(f"Summary: {v}")
+                    elif k == "sale_date" and v:
+                        parts.append(f"Sale Date: {v}")
+                    elif k == "unit_price" and v:
+                        parts.append(f"Unit Price: {v}")
+                    elif k == "total_price" and v:
+                        parts.append(f"Total Price: {v}")
+                    elif k == "customer_email" and v:
+                        parts.append(f"Email: {v}")
+                    else:
+                        parts.append(f"{k}: {v}")
                 lines.append(f"Record {i}: " + ", ".join(parts) + ".")
             else:
                 lines.append(f"{i}. {item}")
         return "\n".join(lines)
     if isinstance(data, dict):
-        parts = [f"{k} {v}" for k, v in data.items()]
+        parts = []
+        for k, v in data.items():
+            # Skip raw fields if a more formatted/concatenated version is present
+            if k == "customer_first_name" or k == "customer_last_name":
+                if "customer_full_name" in data: continue
+            if k == "product_description_raw" and "product_full_description" in data:
+                continue
+
+            # Add formatted parts
+            if k == "customer_full_name" and v:
+                parts.append(f"Customer: {v}")
+            elif k == "product_full_description" and v:
+                parts.append(f"Product: {v}")
+            elif k == "sale_summary" and v:
+                parts.append(f"Summary: {v}")
+            elif k == "sale_date" and v:
+                parts.append(f"Sale Date: {v}")
+            elif k == "unit_price" and v:
+                parts.append(f"Unit Price: {v}")
+            elif k == "total_price" and v:
+                parts.append(f"Total Price: {v}")
+            elif k == "customer_email" and v:
+                parts.append(f"Email: {v}")
+            else:
+                parts.append(f"{k}: {v}")
         return ", ".join(parts) + "."
     return str(data)
 
@@ -652,7 +715,7 @@ def format_natural(data) -> str:
 def normalize_args(args):
     mapping = {
         "product_name": "name",
-        "customer_name": "name",
+        "customer_name": "name", # This will now map to first_name/last_name internally
         "item": "name"
     }
     for old_key, new_key in mapping.items():
@@ -662,7 +725,9 @@ def normalize_args(args):
 
 
 def extract_name(text):
-    match = re.search(r'customer\s+(\w+)', text, re.IGNORECASE)
+    # This function needs to be updated to extract first and last name if possible
+    # For now, it extracts a single name, which will be treated as first_name
+    match = re.search(r'customer\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)', text, re.IGNORECASE)
     return match.group(1) if match else None
 
 
@@ -725,8 +790,8 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
 
 # ========== MAIN ==========
 if application == "MCP Application":
-    user_avatar_url = "https://cdn-icons-png.flaticon.com/512/1946/1946429.png"
-    agent_avatar_url = "https://cdn-icons-png.flaticon.com/512/4712/4712039.png"
+    user_avatar_url = "[https://cdn-icons-png.flaticon.com/512/1946/1946429.png](https://cdn-icons-png.flaticon.com/512/1946/1946429.png)"
+    agent_avatar_url = "[https://cdn-icons-png.flaticon.com/512/4712/4712039.png](https://cdn-icons-png.flaticon.com/512/4712/4712039.png)"
 
     openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
@@ -862,6 +927,9 @@ if application == "MCP Application":
                     st.markdown("#### Here's the updated table after your operation:")
                     read_tool = tool
                     read_args = {}
+                    # Pass the selected display option when re-reading the table
+                    if read_tool == "sales_crud": # Only sales_crud supports display_format
+                        read_args["display_format"] = st.session_state.get("display_option_select", "Default Formatting")
                     updated_table = call_mcp_tool(read_tool, "read", read_args)
                     if isinstance(updated_table, dict) and "result" in updated_table:
                         updated_df = pd.DataFrame(updated_table["result"])
@@ -873,16 +941,8 @@ if application == "MCP Application":
                 st.markdown("#### Here's the current table:")
                 df = pd.DataFrame(content["result"])
                 st.table(df)
-                if tool == "sqlserver_crud":
-                    st.markdown(
-                        f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps."
-                    )
-                elif tool == "postgresql_crud":
-                    st.markdown(
-                        f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions."
-                    )
-                else:
-                    st.markdown(f"The table contains {len(df)} records.")
+                # The description below will be less specific now as formatting is dynamic
+                st.markdown(f"The table contains {len(df)} records with applied formatting.")
             elif action == "describe" and isinstance(content['result'], list):
                 st.markdown("#### Table Schema: ")
                 df = pd.DataFrame(content['result'])
@@ -967,6 +1027,14 @@ if application == "MCP Application":
             args = normalize_args(args)
             p["args"] = args
 
+            # Special handling for customer_name to split into first_name and last_name
+            if "name" in args and tool == "sales_crud" and action in ["create", "update"]:
+                customer_full_name = args.pop("name")
+                name_parts = customer_full_name.split(maxsplit=1)
+                args["first_name"] = name_parts[0]
+                args["last_name"] = name_parts[1] if len(name_parts) > 1 else ""
+                p["args"] = args
+
             if action == "describe" and "table_name" in args:
                 if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
                     args["table_name"] = "Customers"
@@ -975,20 +1043,34 @@ if application == "MCP Application":
 
             # SQL Server: update by name
             if tool == "sqlserver_crud" and action == "update":
-                if "name" not in args:
-                    extracted_name = extract_name(user_query)
-                    if extracted_name:
-                        args['name'] = extracted_name
-                        p['args'] = args
-                if "customer_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
+                # Assuming user might still say "update customer John's email"
+                if "name" in args: # If user provides full name for update
+                    customer_full_name = args.pop("name")
+                    name_parts = customer_full_name.split(maxsplit=1)
+                    first_name = name_parts[0]
+                    last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+                    read_args = {"first_name": first_name, "last_name": last_name}
                     read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
+                    if isinstance(read_result, dict) and "result" in read_result and read_result["result"]:
+                        # Find exact match
                         matches = [r for r in read_result["result"] if
-                                   r.get("Name", "").lower() == args["name"].lower()]
+                                   r.get("FirstName", "").lower() == first_name.lower() and
+                                   r.get("LastName", "").lower() == last_name.lower()]
                         if matches:
                             args["customer_id"] = matches[0]["Id"]
                             p["args"] = args
+                
+                if "customer_id" not in args and "name" in args: # Fallback if name not split correctly
+                    read_args = {"name": args["name"]} # This name is actually full name
+                    read_result = call_mcp_tool(tool, "read", read_args)
+                    if isinstance(read_result, dict) and "result" in read_result:
+                        matches = [r for r in read_result["result"] if
+                                   (r.get("FirstName", "") + " " + r.get("LastName", "")).lower() == args["name"].lower()]
+                        if matches:
+                            args["customer_id"] = matches[0]["Id"]
+                            p["args"] = args
+
                 if "new_email" not in args:
                     possible_email = extract_email(user_query)
                     if possible_email:
@@ -997,22 +1079,32 @@ if application == "MCP Application":
 
             if tool == "sqlserver_crud" and action == "delete":
                 if "customer_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
+                    customer_full_name = args.pop("name")
+                    name_parts = customer_full_name.split(maxsplit=1)
+                    first_name = name_parts[0]
+                    last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+                    read_args = {"first_name": first_name, "last_name": last_name}
                     read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
+                    if isinstance(read_result, dict) and "result" in read_result and read_result["result"]:
                         matches = [r for r in read_result["result"] if
-                                   r.get("Name", "").lower() == args["name"].lower()]
+                                   r.get("FirstName", "").lower() == first_name.lower() and
+                                   r.get("LastName", "").lower() == last_name.lower()]
                         if matches:
                             args["customer_id"] = matches[0]["Id"]
                             p["args"] = args
                 if "customer_id" not in args:
-                    extracted_name = extract_name(user_query)
+                    extracted_name = extract_name(user_query) # This extracts full name
                     if extracted_name:
-                        read_args = {"name": extracted_name}
+                        name_parts = extracted_name.split(maxsplit=1)
+                        first_name = name_parts[0]
+                        last_name = name_parts[1] if len(name_parts) > 1 else ""
+                        read_args = {"first_name": first_name, "last_name": last_name}
                         read_result = call_mcp_tool(tool, "read", read_args)
                         if isinstance(read_result, dict) and "result" in read_result:
                             matches = [r for r in read_result["result"] if
-                                       r.get("Name", "").lower() == extracted_name.lower()]
+                                       r.get("FirstName", "").lower() == first_name.lower() and
+                                       r.get("LastName", "").lower() == last_name.lower()]
                             if matches:
                                 args["customer_id"] = matches[0]["Id"]
                                 p["args"] = args
@@ -1061,6 +1153,11 @@ if application == "MCP Application":
                             if matches:
                                 args["product_id"] = matches[0]["id"]
                                 p["args"] = args
+
+            # NEW: Pass selected display option to sales_crud if it's a read operation
+            if action == "read" and tool == "sales_crud":
+                args["display_format"] = st.session_state.get("display_option_select", "Default Formatting")
+                p["args"] = args # Update p with the new args
 
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
         except Exception as e:
