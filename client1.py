@@ -11,7 +11,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
 import re
 from dotenv import load_dotenv
-MCP_SERVER_URL = "http://59.93.160.108/"
+MCP_SERVER_URL = "https://mcp-smxc.onrender.com"
 
 load_dotenv()
 # ========== PAGE CONFIG ==========
