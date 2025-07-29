@@ -1,7 +1,7 @@
 fastmcp
 mysql-connector-python
 psycopg2-binary
-
+groq
 uvicorn
 pyodbc
 streamlit
