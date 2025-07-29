@@ -89,6 +89,7 @@ def seed_databases():
     root = get_mysql_conn(db=None)
     rcur = root.cursor()
     rcur.execute(f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DB}`;")
+    root.commit()
     rcur.close();  root.close()
 
     # 1-b  connect inside the target DB, with autocommit OFF for seeding transaction
