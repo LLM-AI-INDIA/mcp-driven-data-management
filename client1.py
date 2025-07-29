@@ -11,6 +11,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
 import re
 from dotenv import load_dotenv
+MCP_SERVER_URL = "44.229.227.142"
 
 load_dotenv()
 # ========== PAGE CONFIG ==========
@@ -258,7 +259,7 @@ st.markdown("""
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000')}/mcp")
+        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:10000')}/mcp")
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
