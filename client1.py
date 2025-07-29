@@ -1006,9 +1006,9 @@ if application == "MCP Application":
         # --- MIDDLE: Input Box ---
         with chatbar_cols[1]:
             user_query_input = st.text_input(
-                "",
+                "How can I help you today?",
                 placeholder="How can I help you today?",
-                label_visibility="collapsed",
+                label_visibility="hidden",
                 key="chat_input_box"
             )
 
