@@ -31,7 +31,7 @@ MYSQL_USER = must_get_clean("MYSQL_USER")
 MYSQL_PASSWORD = must_get_clean("MYSQL_PASSWORD")
 MYSQL_DB = must_get_clean("MYSQL_DB")
 
-def get_mysql_conn(db: str | None = MYSQL_DB, autocommit: bool = True): # Added autocommit parameter
+def get_mysql_conn(db: str | None = MYSQL_DB, autocommit: bool = True):
     """If db is None we connect to the server only (needed to CREATE DATABASE)."""
     return mysql.connector.connect(
         host=MYSQL_HOST,
@@ -40,16 +40,13 @@ def get_mysql_conn(db: str | None = MYSQL_DB, autocommit: bool = True): # Added 
         password=MYSQL_PASSWORD,
         database=db,
         ssl_disabled=False,          # Aiven requires TLS; keep this False
-        autocommit=autocommit, # Use the passed autocommit value
+        autocommit=autocommit,
     )
 
 
 # ————————————————
 # 2. PostgreSQL Configuration
 # ————————————————
-
-
-
 PG_HOST = must_get_clean("PG_HOST")
 PG_PORT  = must_get_clean("PG_PORT")
 PG_DB   = os.getenv("PG_DB", "postgres")      # db name can default
@@ -86,7 +83,6 @@ def seed_databases():
     MYSQL_DB = must_get_clean("MYSQL_DB")
 
     # 1-a  create the schema if it doesn’t exist (connect with NO default DB)
-    # Each operation gets its own connection and cursor to prevent "Commands out of sync"
     try:
         root_cnx = get_mysql_conn(db=None, autocommit=False)
         rcur = root_cnx.cursor()
@@ -99,7 +95,6 @@ def seed_databases():
         if 'root_cnx' in locals() and root_cnx and root_cnx.is_connected(): root_cnx.close()
 
 
-    # 1-b  connect inside the target DB, with autocommit OFF for seeding transactions
     # Customers Table Operations
     try:
         sql_cnx = get_mysql_conn(autocommit=False)
@@ -234,7 +229,8 @@ def seed_databases():
         print(f"Error dropping products table (PG): {e}")
     finally:
         if 'pcur' in locals() and pcur: pcur.close()
-        if 'pg_cnx' in locals() and pg_cnx and pg_cnx.is_connected(): pg_cnx.close()
+        if 'pg_cnx' in locals() and pg_cnx: pg_cnx.close() # Removed .is_connected()
+
 
     try:
         pg_cnx = get_pg_conn()
@@ -253,7 +249,8 @@ def seed_databases():
         print(f"Error creating products table (PG): {e}")
     finally:
         if 'pcur' in locals() and pcur: pcur.close()
-        if 'pg_cnx' in locals() and pg_cnx and pg_cnx.is_connected(): pg_cnx.close()
+        if 'pg_cnx' in locals() and pg_cnx: pg_cnx.close() # Removed .is_connected()
+
 
     product_rows = []
     try:
@@ -276,7 +273,7 @@ def seed_databases():
         print(f"Error inserting/fetching products (PG): {e}")
     finally:
         if 'pcur' in locals() and pcur: pcur.close()
-        if 'pg_cnx' in locals() and pg_cnx and pg_cnx.is_connected(): pg_cnx.close()
+        if 'pg_cnx' in locals() and pg_cnx: pg_cnx.close() # Removed .is_connected()
 
 
     # ──────────────────────────────────────────────────────────────
@@ -333,13 +330,13 @@ def seed_databases():
     
 
 # ————————————————
-# 5. SQL Server CRUD Tool (now with DESCRIBE) - MODIFIED for FirstName/LastName/Nullable Email
+# 5. SQL Server CRUD Tool (now MySQL Customers CRUD)
 # ————————————————
 @mcp.tool()
-async def sqlserver_crud(
+async def sqlserver_crud( # Renamed conceptually to mysql_customers_crud in future considerations
     operation: str,
-    first_name: str = None, # Changed from name
-    last_name: str = None,  # Added
+    first_name: str = None,
+    last_name: str = None,
     email: str = None,
     limit: int = 10,
     customer_id: int = None,
@@ -350,13 +347,13 @@ async def sqlserver_crud(
     cur  = cnxn.cursor()
 
     if operation == "create":
-        if not first_name or not last_name: # Changed condition
+        if not first_name or not last_name:
             return {"sql": None, "result": "❌ 'first_name' and 'last_name' required for create."}
 
-        sql_query = "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)" # Changed columns
-        cur.execute(sql_query, (first_name, last_name, email)) # Changed parameters
+        sql_query = "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)"
+        cur.execute(sql_query, (first_name, last_name, email))
         cnxn.commit()
-        return {"sql": sql_query, "result": f"✅ Customer '{first_name} {last_name}' added."} # Changed message
+        return {"sql": sql_query, "result": f"✅ Customer '{first_name} {last_name}' added."}
 
     elif operation == "read":
         sql_query = """
@@ -367,13 +364,13 @@ async def sqlserver_crud(
         cur.execute(sql_query)
         rows = cur.fetchall()
         result = [
-            {"Id": r[0], "FirstName": r[1], "LastName": r[2], "Email": r[3], "CreatedAt": r[4].isoformat()} # Changed
+            {"Id": r[0], "FirstName": r[1], "LastName": r[2], "Email": r[3], "CreatedAt": r[4].isoformat()}
             for r in rows
         ]
         return {"sql": sql_query, "result": result}
 
     elif operation == "update":
-        if not customer_id or new_email is None: # new_email can be None for setting NULL
+        if not customer_id or new_email is None:
             return {"sql": None, "result": "❌ 'customer_id' and 'new_email' required for update."}
 
         sql_query = "UPDATE Customers SET Email = %s WHERE Id = %s"
@@ -391,12 +388,11 @@ async def sqlserver_crud(
         return {"sql": sql_query, "result": f"✅ Customer id={customer_id} deleted."}
 
     elif operation == "describe":
-        # Table schema query now includes TABLE_SCHEMA to avoid cross-DB clashes
         if not table_name:
             return {"sql": None, "result": "❌ 'table_name' required for describe."}
 
         sql_query = """
-            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUMLENGTH
+            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
         """
@@ -412,7 +408,7 @@ async def sqlserver_crud(
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
 # ————————————————
-# 6. PostgreSQL CRUD Tool (now with DESCRIBE)
+# 6. PostgreSQL CRUD Tool
 # ————————————————
 @mcp.tool()
 async def postgresql_crud(
@@ -551,7 +547,6 @@ async def postgresql_crud(
     return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
 
-
 @mcp.tool()
 async def sales_crud(
     operation: str,
@@ -570,13 +565,11 @@ async def sales_crud(
     # 1) Resolve IDs & prices
     mysql = get_mysql_conn()    # Use default autocommit=True for tools
     mcur = mysql.cursor()
-    pg    = get_pg_conn();       pcur = pg.cursor()
+    pg    = get_pg_conn();       pcur = pg.cursor() # Keep PG connection
 
     # Fetch customer_id if name given
-    # MODIFIED: to handle FirstName/LastName for customer lookup
-    if operation not in {"read", "describe"}: # Only resolve IDs for create/update/delete
+    if operation not in {"read", "describe"}:
         if customer_name:
-            # Try to find customer by concatenated name (assuming space separated)
             name_parts = customer_name.split(maxsplit=1)
             first_name = name_parts[0]
             last_name = name_parts[1] if len(name_parts) > 1 else ""
@@ -589,7 +582,6 @@ async def sales_crud(
             if row:
                 customer_id = row[0]
             else:
-                # If not found, create new customer
                 email = (email or f"{re.sub(r'[^a-z0-9]+', '', customer_name.lower())}@example.com")
                 mcur.execute(
                     "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
@@ -599,6 +591,7 @@ async def sales_crud(
                 customer_id = mcur.lastrowid
 
         if product_name:
+            # Query PostgreSQL products table
             pcur.execute(
                 "SELECT id FROM products WHERE name = %s LIMIT 1",
                 (product_name,),
@@ -606,14 +599,19 @@ async def sales_crud(
             row = pcur.fetchone()
             if row:
                 product_id = row[0]
-
             else:
+                # Insert into PostgreSQL products table
+                if unit_price is None:
+                    return {"sql": None, "result": "❌ 'unit_price' required to create new product."}
+                
                 pcur.execute(
                     "INSERT INTO products (name, price) VALUES (%s, %s) RETURNING id",
                     (product_name, unit_price),
                 )
                 product_id = pcur.fetchone()[0]
                 pg.commit()
+            
+            # Mirror to MySQL ProductsCache
             mcur.execute(
         """
         INSERT INTO ProductsCache
@@ -639,6 +637,8 @@ async def sales_crud(
                 "VALUES (%s, %s, %s, %s, %s)" )
         mcur.execute(sql, (customer_id, product_id, quantity, unit_price, total))
         mysql.commit()
+        
+        # Update quantity and sales_amount in PostgreSQL products table
         pcur.execute(
             """
             UPDATE products
@@ -648,7 +648,6 @@ async def sales_crud(
             """,
             (quantity, total, product_id),
         )
-        mysql.commit()
         pg.commit()
         return {
             "sql": sql,
@@ -660,27 +659,27 @@ async def sales_crud(
     elif operation == "read":
         mysql = get_mysql_conn()
         mcur  = mysql.cursor()  
-        # Removed the redundant SELECT * FROM Sales; query
         sql = """
         SELECT  s.Id,
-                c.FirstName, -- Changed from c.Name
-                c.LastName,  -- Added
+                c.FirstName,
+                c.LastName,
                 p.name      AS product_name,
-                p.description AS product_description, -- Added for concatenation demo
+                p.description AS product_description,
                 s.quantity,
                 s.unit_price,
                 s.total_price,
                 s.sale_date,
-                c.Email AS customer_email -- Added for Null Value Handling demo
+                c.Email AS customer_email
         FROM    Sales          s
         JOIN    Customers      c ON c.Id = s.customer_id
-        JOIN    ProductsCache  p ON p.id = s.product_id
+        JOIN    ProductsCache  p ON p.id = s.product_id -- JOIN with MySQL ProductsCache table
         ORDER BY s.sale_date DESC;
         """
         mcur.execute(sql)
         rows = mcur.fetchall()
 
         mcur.close();  mysql.close()
+        pcur.close(); pg.close() # Close PG connection after use
 
         processed_results = []
         for r in rows:
@@ -693,51 +692,40 @@ async def sales_crud(
                 "quantity":    r[5],
                 "unit_price":  float(r[6]),
                 "total_price": float(r[7]),
-                "sale_date":   r[8], # Keep as datetime object for flexible formatting
-                "customer_email": r[9] # Raw email
+                "sale_date":   r[8],
+                "customer_email": r[9]
             }
 
             # Apply formatting based on display_format
             if display_format == "Data Format Conversion":
-                # Convert date to a more readable format
                 sale_data["sale_date"] = sale_data["sale_date"].strftime("%Y-%m-%d %H:%M:%S") if sale_data["sale_date"] else "N/A"
-                # Remove raw name parts if full name is available
                 sale_data.pop("customer_first_name", None)
                 sale_data.pop("customer_last_name", None)
                 sale_data.pop("product_description_raw", None)
-                sale_data.pop("customer_email", None) # Not relevant for this format
+                sale_data.pop("customer_email", None)
             elif display_format == "Decimal Value Formatting":
-                # Format prices to 2 decimal places
                 sale_data["unit_price"] = f"{sale_data['unit_price']:.2f}"
                 sale_data["total_price"] = f"{sale_data['total_price']:.2f}"
-                # Remove raw name parts if full name is available
                 sale_data.pop("customer_first_name", None)
                 sale_data.pop("customer_last_name", None)
                 sale_data.pop("product_description_raw", None)
-                sale_data.pop("customer_email", None) # Not relevant for this format
+                sale_data.pop("customer_email", None)
             elif display_format == "String Concatenation":
-                # Concatenate customer full name
                 sale_data["customer_full_name"] = f"{sale_data['customer_first_name']} {sale_data['customer_last_name']}"
-                # Concatenate product name and description
                 sale_data["product_full_description"] = f"{sale_data['product_name']} ({sale_data['product_description_raw'] or 'No description'})"
-                # Concatenate sale summary
                 sale_data["sale_summary"] = (
                     f"{sale_data['customer_first_name']} {sale_data['customer_last_name']} "
                     f"bought {sale_data['quantity']} of {sale_data['product_name']} "
                     f"for ${sale_data['total_price']:.2f}"
                 )
-                # Remove raw fields after concatenation
                 sale_data.pop("customer_first_name", None)
                 sale_data.pop("customer_last_name", None)
                 sale_data.pop("product_description_raw", None)
-                sale_data.pop("customer_email", None) # Not relevant for this format
+                sale_data.pop("customer_email", None)
             elif display_format == "Null Value Removal/Handling":
-                # If customer_email is None, skip this record (removal demonstration)
                 if sale_data["customer_email"] is None:
-                    continue # Skips to the next record in the loop
-                # If product_description_raw is None, replace with 'N/A' (handling demonstration)
+                    continue
                 sale_data["product_description_raw"] = sale_data["product_description_raw"] or "N/A"
-                # Remove raw name parts if full name is available
                 sale_data.pop("customer_first_name", None)
                 sale_data.pop("customer_last_name", None)
 
