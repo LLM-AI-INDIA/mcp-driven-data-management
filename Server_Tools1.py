@@ -23,7 +23,7 @@ def must_get_clean(key: str) -> str:
     return raw.split('#', 1)[0].strip()
 
 # ————————————————
-# 1. SQL Server Configuration
+# 1. MySQL Configuration
 # ————————————————
 MYSQL_HOST = must_get_clean("MYSQL_HOST")
 MYSQL_PORT = must_get_clean("MYSQL_PORT")
@@ -95,23 +95,25 @@ def seed_databases():
     sql_cnx = get_mysql_conn()
     mcur = sql_cnx.cursor()
 
-    # Customers
+    # Customers - MODIFIED: Added FirstName, LastName, Email is nullable, added Null Email customer
     mcur.execute("DROP TABLE IF EXISTS Customers;")
     mcur.execute("""
         CREATE TABLE Customers (
             Id        INT AUTO_INCREMENT PRIMARY KEY,
-            Name      VARCHAR(100) NOT NULL,
-            Email     VARCHAR(100) NOT NULL,
+            FirstName VARCHAR(50) NOT NULL,
+            LastName  VARCHAR(50) NOT NULL,
+            Email     VARCHAR(100), -- Made nullable
             CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
     mcur.executemany(
-        "INSERT INTO Customers (Name, Email) VALUES (%s, %s)",
-        [("Alice", "alice@example.com"),
-         ("Bob",   "bob@example.com")]
+        "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
+        [("Alice", "Smith", "alice@example.com"),
+         ("Bob", "Johnson", "bob@example.com"),
+         ("Null", "User", None)] # Customer with NULL email for demonstration
     )
 
-    # Sales (starts empty)
+    # Sales (starts empty, but add some for initial data) - MODIFIED to add sample sales
     mcur.execute("DROP TABLE IF EXISTS Sales;")
     mcur.execute("""
         CREATE TABLE Sales (
@@ -123,7 +125,9 @@ def seed_databases():
             total_price  DECIMAL(14,2) NOT NULL,
             sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,9.99*10);
+        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
+        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
+        INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
     """)
     sql_cnx.commit()
     mcur.close();  sql_cnx.close()
@@ -154,6 +158,7 @@ def seed_databases():
         [
             ("Widget",  9.99, 25, 9.99 * 25, "A standard widget."),
             ("Gadget", 14.99, 10, 14.99 * 10, "A useful gadget."),
+            ("Doodad", 5.00, 0, 0, None), # Product with NULL description for demonstration
         ],
     )
 
@@ -174,7 +179,7 @@ def seed_databases():
             id    INT PRIMARY KEY,
             name  VARCHAR(100) NOT NULL,
             price DECIMAL(12,4) NOT NULL,
-            quantity     INT           NOT NULL DEFAULT 0,   -- ⬅️ new
+            quantity     INT           NOT NULL DEFAULT 0,
             sales_amount DECIMAL(14,2) NOT NULL DEFAULT 0
         );
     """)
@@ -191,12 +196,13 @@ def seed_databases():
     
 
 # ————————————————
-# 5. SQL Server CRUD Tool (now with DESCRIBE)
+# 5. SQL Server CRUD Tool (now with DESCRIBE) - MODIFIED for FirstName/LastName/Nullable Email
 # ————————————————
 @mcp.tool()
 async def sqlserver_crud(
     operation: str,
-    name: str = None,
+    first_name: str = None, # Changed from name
+    last_name: str = None,  # Added
     email: str = None,
     limit: int = 10,
     customer_id: int = None,
@@ -207,36 +213,36 @@ async def sqlserver_crud(
     cur  = cnxn.cursor()
 
     if operation == "create":
-        if not name or not email:
-            return {"sql": None, "result": "❌ 'name' and 'email' required for create."}
+        if not first_name or not last_name: # Changed condition
+            return {"sql": None, "result": "❌ 'first_name' and 'last_name' required for create."}
 
-        sql_query = "INSERT INTO Customers (Name, Email) VALUES (%s, %s)"
-        cur.execute(sql_query, (name, email))
+        sql_query = "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)" # Changed columns
+        cur.execute(sql_query, (first_name, last_name, email)) # Changed parameters
         cnxn.commit()
-        return {"sql": sql_query, "result": f"✅ Customer '{name}' added."}
+        return {"sql": sql_query, "result": f"✅ Customer '{first_name} {last_name}' added."} # Changed message
 
     elif operation == "read":
         sql_query = """
-            SELECT Id, Name, Email, CreatedAt
+            SELECT Id, FirstName, LastName, Email, CreatedAt
             FROM Customers
             ORDER BY Id ASC
         """
         cur.execute(sql_query)
         rows = cur.fetchall()
         result = [
-            {"Id": r[0], "Name": r[1], "Email": r[2], "CreatedAt": r[3].isoformat()}
+            {"Id": r[0], "FirstName": r[1], "LastName": r[2], "Email": r[3], "CreatedAt": r[4].isoformat()} # Changed
             for r in rows
         ]
         return {"sql": sql_query, "result": result}
 
     elif operation == "update":
-        if not customer_id or not new_email:
+        if not customer_id or new_email is None: # new_email can be None for setting NULL
             return {"sql": None, "result": "❌ 'customer_id' and 'new_email' required for update."}
 
         sql_query = "UPDATE Customers SET Email = %s WHERE Id = %s"
         cur.execute(sql_query, (new_email, customer_id))
         cnxn.commit()
-        return {"sql": sql_query, "result": f"✅ Customer id={customer_id} updated."}
+        return {"sql": sql_query, "result": f"✅ Customer id={customer_id} email updated to {new_email}."}
 
     elif operation == "delete":
         if not customer_id:
@@ -421,29 +427,35 @@ async def sales_crud(
     unit_price:   float = None,
     sale_id:       int  = None,
     total_price:  float = None,
-    total_amount: float = None
+    total_amount: float = None,
+    display_format: str = None # NEW PARAMETER for formatting control
 ) -> Any:
     # 1) Resolve IDs & prices
     mysql = get_mysql_conn();    mcur = mysql.cursor()
     pg    = get_pg_conn();       pcur = pg.cursor()
 
     # Fetch customer_id if name given
-    
-    if operation in {"read", "describe"}:
-        pass
-    else:
+    # MODIFIED: to handle FirstName/LastName for customer lookup
+    if operation not in {"read", "describe"}: # Only resolve IDs for create/update/delete
         if customer_name:
+            # Try to find customer by concatenated name (assuming space separated)
+            name_parts = customer_name.split(maxsplit=1)
+            first_name = name_parts[0]
+            last_name = name_parts[1] if len(name_parts) > 1 else ""
+
             mcur.execute(
-               "SELECT Id FROM Customers WHERE Name = %s LIMIT 1",                (customer_name,),
+               "SELECT Id FROM Customers WHERE FirstName = %s AND LastName = %s LIMIT 1",
+               (first_name, last_name),
             )
             row = mcur.fetchone()
             if row:
                 customer_id = row[0]
             else:
+                # If not found, create new customer
                 email = (email or f"{re.sub(r'[^a-z0-9]+', '', customer_name.lower())}@example.com")
                 mcur.execute(
-                    "INSERT INTO Customers (Name, Email) VALUES (%s, %s)",
-                    (customer_name, email),
+                    "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
+                    (first_name, last_name, email),
                 )
                 mysql.commit()
                 customer_id = mcur.lastrowid
@@ -506,58 +518,93 @@ async def sales_crud(
                       f"prod={product_id}, qty={quantity}, total={total}"
         }
 
-    # READ
+    # READ - MODIFIED to apply formatting based on display_format
     elif operation == "read":
         mysql = get_mysql_conn()
         mcur  = mysql.cursor()  
-        sql = """ SELECT * FROM Sales;"""      
-        mcur.execute(sql)
-        rows = mcur.fetchall();
-        if rows == " ": print("select * from sales is not working")
         sql = """
         SELECT  s.Id,
-        c.Name      AS customer,
-        p.name      AS product,
-        s.quantity,
-        s.unit_price,
-        s.total_price,
-        s.sale_date
-FROM    Sales          s
-JOIN    Customers      c ON c.Id = s.customer_id
-JOIN    ProductsCache  p ON p.id = s.product_id
-ORDER BY s.sale_date DESC;
-    """
+                c.FirstName, -- Changed from c.Name
+                c.LastName,  -- Added
+                p.name      AS product_name,
+                p.description AS product_description, -- Added for concatenation demo
+                s.quantity,
+                s.unit_price,
+                s.total_price,
+                s.sale_date,
+                c.Email AS customer_email -- Added for Null Value Handling demo
+        FROM    Sales          s
+        JOIN    Customers      c ON c.Id = s.customer_id
+        JOIN    ProductsCache  p ON p.id = s.product_id
+        ORDER BY s.sale_date DESC;
+        """
         mcur.execute(sql)
         rows = mcur.fetchall()
 
         mcur.close();  mysql.close()
 
-        result = [
-        {
-            "sale_id":     r[0],
-            "customer":    r[1],
-            "product":     r[2],
-            "quantity":    r[3],
-            "unit_price":  float(r[4]),
-            "total_price": float(r[5]),
-            "sale_date":   r[6].isoformat() if r[6] else None,
-        }
-        for r in rows
-        ]
-        #return {"sql": sql, "result": result}
+        processed_results = []
+        for r in rows:
+            sale_data = {
+                "sale_id":     r[0],
+                "customer_first_name": r[1],
+                "customer_last_name": r[2],
+                "product_name": r[3],
+                "product_description_raw": r[4], # Raw description
+                "quantity":    r[5],
+                "unit_price":  float(r[6]),
+                "total_price": float(r[7]),
+                "sale_date":   r[8], # Keep as datetime object for flexible formatting
+                "customer_email": r[9] # Raw email
+            }
 
+            # Apply formatting based on display_format
+            if display_format == "Data Format Conversion":
+                # Convert date to a more readable format
+                sale_data["sale_date"] = sale_data["sale_date"].strftime("%Y-%m-%d %H:%M:%S") if sale_data["sale_date"] else "N/A"
+                # Remove raw name parts if full name is available
+                sale_data.pop("customer_first_name", None)
+                sale_data.pop("customer_last_name", None)
+                sale_data.pop("product_description_raw", None)
+                sale_data.pop("customer_email", None) # Not relevant for this format
+            elif display_format == "Decimal Value Formatting":
+                # Format prices to 2 decimal places
+                sale_data["unit_price"] = f"{sale_data['unit_price']:.2f}"
+                sale_data["total_price"] = f"{sale_data['total_price']:.2f}"
+                # Remove raw name parts if full name is available
+                sale_data.pop("customer_first_name", None)
+                sale_data.pop("customer_last_name", None)
+                sale_data.pop("product_description_raw", None)
+                sale_data.pop("customer_email", None) # Not relevant for this format
+            elif display_format == "String Concatenation":
+                # Concatenate customer full name
+                sale_data["customer_full_name"] = f"{sale_data['customer_first_name']} {sale_data['customer_last_name']}"
+                # Concatenate product name and description
+                sale_data["product_full_description"] = f"{sale_data['product_name']} ({sale_data['product_description_raw'] or 'No description'})"
+                # Concatenate sale summary
+                sale_data["sale_summary"] = (
+                    f"{sale_data['customer_first_name']} {sale_data['customer_last_name']} "
+                    f"bought {sale_data['quantity']} of {sale_data['product_name']} "
+                    f"for ${sale_data['total_price']:.2f}"
+                )
+                # Remove raw fields after concatenation
+                sale_data.pop("customer_first_name", None)
+                sale_data.pop("customer_last_name", None)
+                sale_data.pop("product_description_raw", None)
+                sale_data.pop("customer_email", None) # Not relevant for this format
+            elif display_format == "Null Value Removal/Handling":
+                # If customer_email is None, skip this record (removal demonstration)
+                if sale_data["customer_email"] is None:
+                    continue # Skips to the next record in the loop
+                # If product_description_raw is None, replace with 'N/A' (handling demonstration)
+                sale_data["product_description_raw"] = sale_data["product_description_raw"] or "N/A"
+                # Remove raw name parts if full name is available
+                sale_data.pop("customer_first_name", None)
+                sale_data.pop("customer_last_name", None)
 
-        '''result.append({
-                "sale_id":     sale_id,
-                "customer":    customer,
-                "product":     prod_map.get(prod_id, f"id={prod_id}"),
-                "quantity":    qty,
-                "unit_price":  float(u_price),
-                "total_price": float(t_price),
-                "sale_date":   s_date.isoformat(),
-            })'''
+            processed_results.append(sale_data)
 
-        return {"sql": sql, "result": result}
+        return {"sql": sql, "result": processed_results}
 
     # UPDATE (only quantity or unit_price)
     elif operation == "update":
@@ -618,4 +665,5 @@ if __name__ == "__main__":
     seed_databases()
 
     # 2) Launch the MCP server with Streamable HTTP at /streamable-http
-    mcp.run(transport="streamable-http")
+    port = int(os.environ.get("PORT", 8000)) # Added port for deployment flexibility
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=port) # Added host and port
