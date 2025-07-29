@@ -106,7 +106,12 @@ def seed_databases():
             CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
-    mcur.executemany(
+    mcur.close();sql_cnx.close()
+
+    # 1-c new connection
+    sql_cnx_1 = get_mysql_conn()
+    tcur = sql_cnx_1.cursor()
+    tcur.executemany(
         "INSERT INTO Customers (FirstName, LastName, Email) VALUES (%s, %s, %s)",
         [("Alice", "Smith", "alice@example.com"),
          ("Bob", "Johnson", "bob@example.com"),
@@ -114,8 +119,8 @@ def seed_databases():
     )
 
     # Sales (starts empty, but add some for initial data) - MODIFIED to add sample sales
-    mcur.execute("DROP TABLE IF EXISTS Sales;")
-    mcur.execute("""
+    tcur.execute("DROP TABLE IF EXISTS Sales;")
+    tcur.execute("""
         CREATE TABLE Sales (
             Id           INT AUTO_INCREMENT PRIMARY KEY,
             customer_id  INT NOT NULL,
@@ -127,17 +132,17 @@ def seed_databases():
         );
     """)
     # Separated INSERT statement for Sales table to avoid "Commands out of sync" error
-    mcur.execute("""
+    tcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
     """)
-    mcur.execute("""
+    tcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
     """)
-    mcur.execute("""
+    tcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
     """)
-    sql_cnx.commit()
-    mcur.close();  sql_cnx.close()
+    sql_cnx_1.commit()
+    tcur.close();  sql_cnx_1.close()
 
     # ──────────────────────────────────────────────────────────────
     # 2 ─ PostgreSQL – create / seed products
