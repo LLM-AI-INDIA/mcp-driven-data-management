@@ -125,8 +125,15 @@ def seed_databases():
             total_price  DECIMAL(14,2) NOT NULL,
             sale_date    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+    """)
+    # Separated INSERT statement for Sales table to avoid "Commands out of sync" error
+    mcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (1,1,10,9.99,99.90);
+    """)
+    mcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (2,2,5,14.99,74.95);
+    """)
+    mcur.execute("""
         INSERT INTO Sales (customer_id, product_id, quantity, unit_price, total_price) VALUES (3,1,3,9.99,29.97); -- Sale by Null User
     """)
     sql_cnx.commit()
@@ -259,7 +266,7 @@ async def sqlserver_crud(
             return {"sql": None, "result": "❌ 'table_name' required for describe."}
 
         sql_query = """
-            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUM_LENGTH
+            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, CHARACTER_MAXIMUMLENGTH
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
         """
