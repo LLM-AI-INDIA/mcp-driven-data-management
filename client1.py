@@ -258,7 +258,7 @@ st.markdown("""
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://0.0.0.0:10000')}/mcp/")
+        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://0.0.0.0:8000')}/mcp/")
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
