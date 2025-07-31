@@ -4,11 +4,13 @@ import streamlit as st
 import base64
 from io import BytesIO
 from PIL import Image
-from groq import Groq # NEW: Groq import
+from groq import Groq 
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
-import re
+from datetime import datetime # Import datetime for date formatting
+from decimal import Decimal, InvalidOperation # Import Decimal for precise decimal handling
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -257,7 +259,7 @@ st.markdown("""
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000')}") # Removed /mcp here
+        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000/mcp')}") 
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
@@ -351,8 +353,6 @@ with st.sidebar:
             key="display_option_select"
         )
 
-        # REMOVED: Refresh Tools button from sidebar
-
         st.button("Clear/Reset", key="clear_button")
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
@@ -437,7 +437,7 @@ if "available_tools" not in st.session_state:
 
 # Initialize MCP_SERVER_URL in session state
 if "MCP_SERVER_URL" not in st.session_state:
-    st.session_state["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") # Changed default to include /mcp
+    st.session_state["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") 
 
 # ADD THIS NEW LINE:
 st.sidebar.info(f"Client trying to connect to: {st.session_state['MCP_SERVER_URL']}")
@@ -453,6 +453,12 @@ if "menu_expanded" not in st.session_state:
     st.session_state["menu_expanded"] = True
 if "chat_input_box" not in st.session_state:
     st.session_state["chat_input_box"] = ""
+
+# NEW: State for conversational loop
+if "pending_tool_call" not in st.session_state:
+    st.session_state.pending_tool_call = None
+if "awaiting_input_for_field" not in st.session_state:
+    st.session_state.awaiting_input_for_field = None
 
 
 # ========== HELPER FUNCTIONS ==========
@@ -585,10 +591,16 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
 
         "ARGUMENT EXTRACTION:\n"
         "- Extract relevant business parameters from the user query\n"
-        "- For `sqlserver_crud` (customers): Use `first_name`, `last_name`, `email`, `customer_id`, `new_email`.\n"
-        "- For `postgresql_crud` (products): Use `name`, `price`, `description`, `product_id`, `new_price`, `new_quantity`, `sales_amount`.\n"
+        "- For `sqlserver_crud` (customers): Use `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `new_first_name`, `new_last_name`.\n"
+        "- For `postgresql_crud` (products): Use `name`, `price`, `description`, `product_id`, `new_price`, `new_quantity`, `sales_amount`, `category`, `launch_date`, `new_category`, `new_launch_date`.\n"
         "- For `sales_crud` (sales): Use `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`.\n"
         "- For `describe`: include 'table_name' if mentioned (e.g., 'Customers', 'products', 'Sales').\n\n"
+        "- **ETL Scenario Guidance for LLM (for create/update operations):**\n"
+        "  - **Data Format Conversion (Dates):** If a date is provided (e.g., '31-07-2025', 'July 31st 2025'), extract it and format it as 'YYYY-MM-DD' for `launch_date` in `postgresql_crud`.\n"
+        "  - **Decimal Value Formatting:** Ensure `price`, `unit_price`, `total_amount` are extracted as floats. The server will handle rounding to 2 decimal places.\n"
+        "  - **String Concatenation (Names):** If a full customer name is provided (e.g., 'Jon Snow'), split it into `first_name` and `last_name` for `sqlserver_crud`. If only one name is given, use it as `first_name` and leave `last_name` empty.\n"
+        "  - **Null Value Handling (Category):** If a new product is added and no `category` is specified, do NOT provide a `category` argument. Let the server's default 'Uncategorized' apply. If the user explicitly states 'no category' or 'uncategorized', pass 'Uncategorized'.\n\n"
+
 
         f"AVAILABLE TOOLS:\n{tools_description}\n\n"
 
@@ -602,6 +614,9 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
         "Query: 'update email for customer 1 to new@example.com' → {\"tool\": \"sqlserver_crud\", \"action\": \"update\", \"args\": {\"customer_id\": 1, \"new_email\": \"new@example.com\"}}\n"
         "Query: 'update product 1 price to 10.50' → {\"tool\": \"postgresql_crud\", \"action\": \"update\", \"args\": {\"product_id\": 1, \"new_price\": 10.50}}\n"
         "Query: 'update sale 1 quantity to 12' → {\"tool\": \"sales_crud\", \"action\": \"update\", \"args\": {\"sale_id\": 1, \"new_quantity\": 12}}\n"
+        "Query: 'Add a product called SmartWatch with price 299.99 and category Wearables launched on 2024-05-20' -> {\"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": {\"name\": \"SmartWatch\", \"price\": 299.99, \"category\": \"Wearables\", \"launch_date\": \"2024-05-20\"}}\n"
+        "Query: 'Add a product called EcoBike for 750.55' -> {\"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": {\"name\": \"EcoBike\", \"price\": 750.55}}\n"
+        "Query: 'Update product 1 launch date to 15-08-2023' -> {\"tool\": \"postgresql_crud\", \"action\": \"update\", \"args\": {\"product_id\": 1, \"new_launch_date\": \"2023-08-15\"}}\n"
     )
 
     prompt = f"User query: \"{query}\"\n\nAs a sales agent, analyze the query and select the most appropriate tool based on the descriptions above. Consider the business context and data relationships. Respond with JSON only."
@@ -677,98 +692,240 @@ def call_mcp_tool(tool: str, action: str, args: dict) -> any:
     return asyncio.run(_invoke_tool(tool, action, args))
 
 
-def format_natural(data) -> str:
+def format_natural(data, display_option: str = "Default Formatting") -> str:
+    """
+    Formats the data for natural language display based on the selected display option.
+    Applies ETL-like transformations for display purposes.
+    """
     if isinstance(data, list):
-        lines = []
-        for i, item in enumerate(data, 1):
+        processed_items = []
+        for item in data:
             if isinstance(item, dict):
-                # Improved formatting for dict items, especially for new concatenated fields
+                formatted_item = item.copy() # Work on a copy
+                
+                # --- Apply ETL Scenarios for Display ---
+                if display_option == "Data Format Conversion":
+                    # Convert dates to readable format
+                    if "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], datetime):
+                        formatted_item["sale_date"] = formatted_item["sale_date"].strftime("%Y-%m-%d %H:%M:%S")
+                    elif "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], str):
+                         try:
+                             dt_obj = datetime.fromisoformat(formatted_item["sale_date"])
+                             formatted_item["sale_date"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                         except ValueError:
+                             pass # Keep as is if not a valid ISO format
+                    
+                    if "product_launch_date" in formatted_item and isinstance(formatted_item["product_launch_date"], str):
+                        try:
+                            # Assuming server sends ISO format 'YYYY-MM-DD' for date
+                            date_obj = datetime.strptime(formatted_item["product_launch_date"], "%Y-%m-%d").date()
+                            formatted_item["product_launch_date"] = date_obj.strftime("%d-%m-%Y") # Convert to DD-MM-YYYY
+                        except ValueError:
+                            pass # Keep original string if conversion fails
+                    
+                elif display_option == "Decimal Value Formatting":
+                    for key in ["price", "unit_price", "total_price", "sales_amount"]:
+                        if key in formatted_item and (isinstance(formatted_item[key], (float, Decimal, int))):
+                            try:
+                                formatted_item[key] = f"{Decimal(str(formatted_item[key])):.2f}"
+                            except InvalidOperation:
+                                pass # Keep as is if not a valid number
+                
+                elif display_option == "String Concatenation":
+                    if "first_name" in formatted_item and "last_name" in formatted_item:
+                        formatted_item["full_name"] = f"{formatted_item['first_name']} {formatted_item['last_name']}".strip()
+                        formatted_item.pop("first_name", None)
+                        formatted_item.pop("last_name", None)
+                    
+                    if "product_name" in formatted_item and "product_description_raw" in formatted_item and "product_category" in formatted_item:
+                        formatted_item["product_full_description"] = (
+                            f"{formatted_item['product_name']} "
+                            f"({formatted_item['product_description_raw'] or 'No description'}) "
+                            f"[Category: {formatted_item['product_category'] or 'N/A'}]"
+                        )
+                        formatted_item.pop("product_description_raw", None)
+                        formatted_item.pop("product_category", None)
+                    
+                    if "customer_full_name" in formatted_item and "product_name" in formatted_item and "quantity" in formatted_item and "total_price" in formatted_item and "sale_date" in formatted_item:
+                        sale_date_str = formatted_item["sale_date"].strftime("%Y-%m-%d") if isinstance(formatted_item["sale_date"], datetime) else str(formatted_item["sale_date"])
+                        formatted_item["sale_summary"] = (
+                            f"{formatted_item['customer_full_name']} bought {formatted_item['quantity']} of "
+                            f"{formatted_item['product_name']} for ${formatted_item['total_price']:.2f} on {sale_date_str}"
+                        )
+
+                elif display_option == "Null Value Removal/Handling":
+                    # Remove entries with None/null email for sales or customers
+                    if "customer_email" in formatted_item and (formatted_item["customer_email"] is None or formatted_item["customer_email"] == "N/A"):
+                        continue # Skip this record
+                    
+                    # Replace None/null descriptions or categories with 'N/A' or 'Uncategorized' for display
+                    if "product_description_raw" in formatted_item and formatted_item["product_description_raw"] is None:
+                        formatted_item["product_description_raw"] = "N/A"
+                    if "product_category" in formatted_item and formatted_item["product_category"] is None:
+                        formatted_item["product_category"] = "Uncategorized"
+                    if "launch_date" in formatted_item and formatted_item["launch_date"] is None:
+                        formatted_item["launch_date"] = "N/A"
+
+
+                # Construct string representation of the formatted item
                 parts = []
-                for k, v in item.items():
-                    # Skip raw fields if a more formatted/concatenated version is present
-                    if k == "customer_first_name" or k == "customer_last_name":
-                        if "customer_full_name" in item: continue
-                    if k == "product_description_raw" and "product_full_description" in item:
+                for k, v in formatted_item.items():
+                    # Skip raw first/last name if full_name is present
+                    if k in ["first_name", "last_name"] and "full_name" in formatted_item:
+                        continue
+                    # Skip raw product description/category if product_full_description is present
+                    if k in ["product_description_raw", "product_category"] and "product_full_description" in formatted_item:
                         continue
                     
-                    # Add formatted parts
-                    if k == "customer_full_name" and v:
+                    if k == "sale_date" and isinstance(v, datetime):
+                        parts.append(f"Sale Date: {v.strftime('%Y-%m-%d %H:%M:%S')}")
+                    elif k == "product_launch_date" and isinstance(v, (datetime, date)):
+                        parts.append(f"Launch Date: {v.strftime('%Y-%m-%d')}")
+                    elif k == "product_launch_date" and isinstance(v, str): # For already converted strings
+                        parts.append(f"Launch Date: {v}")
+                    elif k == "unit_price" or k == "total_price" or k == "sales_amount":
+                        if isinstance(v, (float, Decimal, int)):
+                            parts.append(f"{k.replace('_', ' ').title()}: ${v:.2f}")
+                        else: # Already formatted string
+                            parts.append(f"{k.replace('_', ' ').title()}: ${v}")
+                    elif k == "email":
+                        parts.append(f"Email: {v or 'N/A'}")
+                    elif k == "description" or k == "product_description_raw":
+                        parts.append(f"Description: {v or 'N/A'}")
+                    elif k == "category" or k == "product_category":
+                        parts.append(f"Category: {v or 'Uncategorized'}")
+                    elif k == "full_name" or k == "customer_full_name":
                         parts.append(f"Customer: {v}")
-                    elif k == "product_full_description" and v:
+                    elif k == "product_full_description":
                         parts.append(f"Product: {v}")
-                    elif k == "sale_summary" and v:
+                    elif k == "sale_summary":
                         parts.append(f"Summary: {v}")
-                    elif k == "sale_date" and v:
-                        parts.append(f"Sale Date: {v}")
-                    elif k == "unit_price" and v:
-                        parts.append(f"Unit Price: {v}")
-                    elif k == "total_price" and v:
-                        parts.append(f"Total Price: {v}")
-                    elif k == "customer_email" and v:
-                        parts.append(f"Email: {v}")
                     else:
-                        parts.append(f"{k}: {v}")
-                lines.append(f"Record {i}: " + ", ".join(parts) + ".")
+                        parts.append(f"{k.replace('_', ' ').title()}: {v}")
+                processed_items.append(", ".join(parts))
             else:
-                lines.append(f"{i}. {item}")
-        return "\n".join(lines)
-    if isinstance(data, dict):
+                processed_items.append(str(item))
+        return "\n".join(processed_items)
+    elif isinstance(data, dict):
+        # Apply formatting for single dictionary (e.g., describe results)
+        formatted_item = data.copy()
+        
+        # Apply ETL Scenarios for Display (similar to list, but for single item)
+        if display_option == "Data Format Conversion":
+            if "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], datetime):
+                formatted_item["sale_date"] = formatted_item["sale_date"].strftime("%Y-%m-%d %H:%M:%S")
+            elif "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], str):
+                try:
+                    dt_obj = datetime.fromisoformat(formatted_item["sale_date"])
+                    formatted_item["sale_date"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
+            if "product_launch_date" in formatted_item and isinstance(formatted_item["product_launch_date"], str):
+                try:
+                    date_obj = datetime.strptime(formatted_item["product_launch_date"], "%Y-%m-%d").date()
+                    formatted_item["product_launch_date"] = date_obj.strftime("%d-%m-%Y")
+                except ValueError:
+                    pass
+        elif display_option == "Decimal Value Formatting":
+            for key in ["price", "unit_price", "total_price", "sales_amount"]:
+                if key in formatted_item and (isinstance(formatted_item[key], (float, Decimal, int))):
+                    try:
+                        formatted_item[key] = f"{Decimal(str(formatted_item[key])):.2f}"
+                    except InvalidOperation:
+                        pass
+        elif display_option == "String Concatenation":
+            if "first_name" in formatted_item and "last_name" in formatted_item:
+                formatted_item["full_name"] = f"{formatted_item['first_name']} {formatted_item['last_name']}".strip()
+                formatted_item.pop("first_name", None)
+                formatted_item.pop("last_name", None)
+            if "product_name" in formatted_item and "product_description_raw" in formatted_item and "product_category" in formatted_item:
+                formatted_item["product_full_description"] = (
+                    f"{formatted_item['product_name']} "
+                    f"({formatted_item['product_description_raw'] or 'No description'}) "
+                    f"[Category: {formatted_item['product_category'] or 'N/A'}]"
+                )
+                formatted_item.pop("product_description_raw", None)
+                formatted_item.pop("product_category", None)
+            if "customer_full_name" in formatted_item and "product_name" in formatted_item and "quantity" in formatted_item and "total_price" in formatted_item and "sale_date" in formatted_item:
+                sale_date_str = formatted_item["sale_date"].strftime("%Y-%m-%d") if isinstance(formatted_item["sale_date"], datetime) else str(formatted_item["sale_date"])
+                formatted_item["sale_summary"] = (
+                    f"{formatted_item['customer_full_name']} bought {formatted_item['quantity']} of "
+                    f"{formatted_item['product_name']} for ${formatted_item['total_price']:.2f} on {sale_date_str}"
+                )
+        elif display_option == "Null Value Removal/Handling":
+            if "customer_email" in formatted_item and (formatted_item["customer_email"] is None or formatted_item["customer_email"] == "N/A"):
+                pass # This format is for filtering lists, not single items.
+            if "product_description_raw" in formatted_item and formatted_item["product_description_raw"] is None:
+                formatted_item["product_description_raw"] = "N/A"
+            if "product_category" in formatted_item and formatted_item["product_category"] is None:
+                formatted_item["product_category"] = "Uncategorized"
+            if "launch_date" in formatted_item and formatted_item["launch_date"] is None:
+                formatted_item["launch_date"] = "N/A"
+
+
         parts = []
-        for k, v in data.items():
-            # Skip raw fields if a more formatted/concatenated version is present
-            if k == "customer_first_name" or k == "customer_last_name":
-                if "customer_full_name" in data: continue
-            if k == "product_description_raw" and "product_full_description" in data:
+        for k, v in formatted_item.items():
+            if k in ["first_name", "last_name"] and "full_name" in formatted_item:
+                continue
+            if k in ["product_description_raw", "product_category"] and "product_full_description" in formatted_item:
                 continue
 
-            # Add formatted parts
-            if k == "customer_full_name" and v:
+            if k == "sale_date" and isinstance(v, datetime):
+                parts.append(f"Sale Date: {v.strftime('%Y-%m-%d %H:%M:%S')}")
+            elif k == "product_launch_date" and isinstance(v, (datetime, date)):
+                parts.append(f"Launch Date: {v.strftime('%Y-%m-%d')}")
+            elif k == "product_launch_date" and isinstance(v, str):
+                parts.append(f"Launch Date: {v}")
+            elif k == "unit_price" or k == "total_price" or k == "sales_amount":
+                if isinstance(v, (float, Decimal, int)):
+                    parts.append(f"{k.replace('_', ' ').title()}: ${v:.2f}")
+                else:
+                    parts.append(f"{k.replace('_', ' ').title()}: ${v}")
+            elif k == "email":
+                parts.append(f"Email: {v or 'N/A'}")
+            elif k == "description" or k == "product_description_raw":
+                parts.append(f"Description: {v or 'N/A'}")
+            elif k == "category" or k == "product_category":
+                parts.append(f"Category: {v or 'Uncategorized'}")
+            elif k == "full_name" or k == "customer_full_name":
                 parts.append(f"Customer: {v}")
-            elif k == "product_full_description" and v:
+            elif k == "product_full_description":
                 parts.append(f"Product: {v}")
-            elif k == "sale_summary" and v:
+            elif k == "sale_summary":
                 parts.append(f"Summary: {v}")
-            elif k == "sale_date" and v:
-                parts.append(f"Sale Date: {v}")
-            elif k == "unit_price" and v:
-                parts.append(f"Unit Price: {v}")
-            elif k == "total_price" and v:
-                parts.append(f"Total Price: {v}")
-            elif k == "customer_email" and v:
-                parts.append(f"Email: {v}")
             else:
-                parts.append(f"{k}: {v}")
+                parts.append(f"{k.replace('_', ' ').title()}: {v}")
         return ", ".join(parts) + "."
     return str(data)
 
 
 def normalize_args(args):
-    mapping = {
-        "product_name": "name",
-        "customer_name": "name", # This will now map to first_name/last_name internally
-        "item": "name"
-    }
-    for old_key, new_key in mapping.items():
-        if old_key in args:
-            args[new_key] = args.pop(old_key)
+    # This function is now less critical as LLM prompt guides direct arg extraction
+    # but kept for any potential edge cases or future needs.
     return args
 
 
-def extract_name(text):
-    # This function needs to be updated to extract first and last name if possible
-    # For now, it extracts a single name, which will be treated as first_name
-    match = re.search(r'customer\s+([a-zA-Z]+(?:\s+[a-zA-Z]+)?)', text, re.IGNORECASE)
-    return match.group(1) if match else None
+# Define required arguments for create operations for conversational loop
+REQUIRED_ARGS_FOR_CREATE = {
+    "sqlserver_crud": ["first_name", "last_name"],
+    "postgresql_crud": ["name", "price"],
+    "sales_crud": ["customer_id", "product_id", "quantity", "unit_price"]
+}
 
-
-def extract_email(text):
-    match = re.search(r'[\w\.-]+@[\w\.-]+', text)
-    return match.group(0) if match else None
-
-
-def extract_price(text):
-    match = re.search(r'(\d+(?:\.\d+)?)', text)
-    return float(match.group(0)) if match else None
+# Define how to extract missing info from a follow-up query
+FIELD_EXTRACTION_MAP = {
+    "first_name": lambda q: re.search(r'(?:first name is|first name)\s+([a-zA-Z]+)', q, re.IGNORECASE),
+    "last_name": lambda q: re.search(r'(?:last name is|last name)\s+([a-zA-Z]+)', q, re.IGNORECASE),
+    "email": lambda q: re.search(r'email\s+([\w\.-]+@[\w\.-]+)', q, re.IGNORECASE),
+    "name": lambda q: re.search(r'(?:name is|name)\s+([a-zA-Z0-9\s]+)', q, re.IGNORECASE),
+    "price": lambda q: re.search(r'(?:price is|price)\s+\$?(\d+(?:\.\d+)?)', q, re.IGNORECASE),
+    "quantity": lambda q: re.search(r'(?:quantity is|quantity)\s+(\d+)', q, re.IGNORECASE),
+    "unit_price": lambda q: re.search(r'(?:unit price is|unit price)\s+\$?(\d+(?:\.\d+)?)', q, re.IGNORECASE),
+    "category": lambda q: re.search(r'(?:category is|category)\s+([a-zA-Z\s]+)', q, re.IGNORECASE),
+    "launch_date": lambda q: re.search(r'(?:launch date is|launched on)\s+(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})', q, re.IGNORECASE),
+    "customer_id": lambda q: re.search(r'(?:customer id is|customer id)\s+(\d+)', q, re.IGNORECASE),
+    "product_id": lambda q: re.search(r'(?:product id is|product id)\s+(\d+)', q, re.IGNORECASE),
+}
 
 
 def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str, llm_model: str) -> str: # Added llm_model
@@ -833,9 +990,7 @@ if application == "MCP Application":
     user_avatar_url = "[https://cdn-icons-png.flaticon.com/512/1946/1946429.png](https://cdn-icons-png.flaticon.com/512/1946/1946429.png)"
     agent_avatar_url = "[https://cdn-icons-png.flaticon.com/512/4712/4712039.png](https://cdn-icons-png.flaticon.com/512/4712/4712039.png)"
 
-    # Removed direct OpenAI client init here, moved to functions
-    # openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) 
-    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") # Updated default
+    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") 
     st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
 
     # Generate dynamic tool descriptions
@@ -858,7 +1013,7 @@ if application == "MCP Application":
         st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
         if st.button("🔄 Refresh", key="refresh_tools_main", help="Rediscover available tools"):
             with st.spinner("Refreshing tools..."):
-                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") # Updated default
+                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") 
                 st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
                 discovered_tools = discover_tools()
                 st.session_state.available_tools = discovered_tools
@@ -923,6 +1078,7 @@ if application == "MCP Application":
             tool = msg.get("tool", "")
             user_query = msg.get("user_query", "")
             current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") # Get selected LLM model
+            selected_display_option = st.session_state.get("display_option_select", "Default Formatting")
 
             with st.expander("Details"):
                 if "request" in msg:
@@ -962,22 +1118,31 @@ if application == "MCP Application":
                     st.markdown("#### Here's the updated table after your operation:")
                     read_tool = tool
                     read_args = {}
-                    # Pass the selected display option when re-reading the table
-                    if read_tool == "sales_crud": # Only sales_crud supports display_format
-                        read_args["display_format"] = st.session_state.get("display_option_select", "Default Formatting")
                     updated_table = call_mcp_tool(read_tool, "read", read_args)
                     if isinstance(updated_table, dict) and "result" in updated_table:
-                        updated_df = pd.DataFrame(updated_table["result"])
+                        # Apply formatting to the displayed table
+                        formatted_table_data = [
+                            ast.literal_eval(format_natural(row, selected_display_option).replace(":", ": ").replace("'", "\"")) # Convert to dict and then back to string for ast.literal_eval
+                            for row in updated_table["result"]
+                        ]
+                        updated_df = pd.DataFrame(formatted_table_data)
                         st.table(updated_df)
                 except Exception as fetch_err:
                     st.info(f"Could not retrieve updated table: {fetch_err}")
 
             if action == "read" and isinstance(content["result"], list):
                 st.markdown("#### Here's the current table:")
-                df = pd.DataFrame(content["result"])
+                # Apply formatting to the displayed table
+                formatted_table_data = []
+                for row in content["result"]:
+                    # Null Value Removal/Handling for read operations (filtering)
+                    if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
+                        continue
+                    formatted_table_data.append(ast.literal_eval(format_natural(row, selected_display_option).replace(":", ": ").replace("'", "\"")))
+                
+                df = pd.DataFrame(formatted_table_data)
                 st.table(df)
-                # The description below will be less specific now as formatting is dynamic
-                st.markdown(f"The table contains {len(df)} records with applied formatting.")
+                st.markdown(f"The table contains {len(df)} records with '{selected_display_option}' applied.")
             elif action == "describe" and isinstance(content['result'], list):
                 st.markdown("#### Table Schema: ")
                 df = pd.DataFrame(content['result'])
@@ -1035,26 +1200,78 @@ if application == "MCP Application":
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== HANDLE HAMBURGER ==========
-    if hamburger_clicked:
-        st.session_state["show_menu"] = not st.session_state.get("show_menu", False)
-        st.rerun()
-
     # ========== PROCESS CHAT INPUT ==========
     if send_clicked and user_query_input:
         user_query = user_query_input
         user_steps = []
-        current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") # Get selected LLM model
+        current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") 
+        selected_display_option = st.session_state.get("display_option_select", "Default Formatting")
 
+        # Handle conversational loop for missing fields
+        if st.session_state.pending_tool_call and st.session_state.awaiting_input_for_field:
+            field_name = st.session_state.awaiting_input_for_field
+            extracted_value = None
+
+            # Attempt to extract the value for the pending field from the new user query
+            if field_name == "first_name" or field_name == "last_name":
+                # Special handling for full name input
+                name_parts = user_query.strip().split(maxsplit=1)
+                if len(name_parts) == 2:
+                    st.session_state.pending_tool_call["args"]["first_name"] = name_parts[0]
+                    st.session_state.pending_tool_call["args"]["last_name"] = name_parts[1]
+                    extracted_value = True # Indicate success
+                elif len(name_parts) == 1:
+                    st.session_state.pending_tool_call["args"]["first_name"] = name_parts[0]
+                    st.session_state.pending_tool_call["args"]["last_name"] = "" # Empty last name
+                    extracted_value = True
+            else:
+                extractor = FIELD_EXTRACTION_MAP.get(field_name)
+                if extractor:
+                    match = extractor(user_query)
+                    if match:
+                        extracted_value = match.group(1)
+                        if field_name in ["price", "quantity", "unit_price"]:
+                            try:
+                                extracted_value = float(extracted_value)
+                            except ValueError:
+                                extracted_value = None # Failed to convert to number
+                        st.session_state.pending_tool_call["args"][field_name] = extracted_value
+
+            if extracted_value is not None:
+                # Clear pending state and proceed with the stored tool call
+                p = st.session_state.pending_tool_call
+                st.session_state.pending_tool_call = None
+                st.session_state.awaiting_input_for_field = None
+                st.session_state.messages.append({
+                    "role": "user",
+                    "content": user_query,
+                    "format": "text",
+                })
+                # Now try to execute the tool call
+                try_execute_tool_call(p, user_query, current_llm_model, selected_display_option)
+                st.rerun()
+            else:
+                st.session_state.messages.append({
+                    "role": "user",
+                    "content": user_query,
+                    "format": "text",
+                })
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": f"I still need the '{field_name.replace('_', ' ')}'. Please provide it clearly.",
+                    "format": "text",
+                })
+                st.rerun()
+            return # Exit to avoid re-parsing the query
+
+        # If not in a pending state, parse the new query
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
             if not enabled_tools:
                 raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
 
-            # Pass the selected LLM model to parse_user_query
             p = parse_user_query(user_query, st.session_state.available_tools, current_llm_model)
             
-            # Check if LLM returned an error during tool selection
             if "error" in p and p.get("tool_selection_error"):
                 raise Exception(p["error"])
 
@@ -1067,11 +1284,9 @@ if application == "MCP Application":
 
             action = p.get("action")
             args = p.get("args", {})
-            args = normalize_args(args)
             p["args"] = args
 
             # Special handling for customer_name to split into first_name and last_name
-            # This logic should apply only to sqlserver_crud (Customers)
             if tool == "sqlserver_crud" and action == "create":
                 if "name" in args: # If user provides full name for create
                     customer_full_name = args.pop("name")
@@ -1080,10 +1295,30 @@ if application == "MCP Application":
                     args["last_name"] = name_parts[1] if len(name_parts) > 1 else ""
                     p["args"] = args
 
+            # Validate required fields for 'create' operations
+            if action == "create" and tool in REQUIRED_ARGS_FOR_CREATE:
+                missing_fields = [field for field in REQUIRED_ARGS_FOR_CREATE[tool] if field not in args or args[field] is None]
+                if missing_fields:
+                    # Store the incomplete tool call
+                    st.session_state.pending_tool_call = p
+                    st.session_state.awaiting_input_for_field = missing_fields[0] # Ask for the first missing field
+                    
+                    st.session_state.messages.append({
+                        "role": "user",
+                        "content": user_query,
+                        "format": "text",
+                    })
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": f"I need more information to {action} a {tool.replace('_crud', '').replace('sqlserver', 'customer').replace('postgresql', 'product')}. Please provide the '{missing_fields[0].replace('_', ' ')}'.",
+                        "format": "text",
+                    })
+                    st.rerun()
+                    return # Exit to wait for next input
+
             # SQL Server: update by name
             if tool == "sqlserver_crud" and action == "update":
-                # Assuming user might still say "update customer John's email"
-                if "name" in args: # If user provides full name for update
+                if "name" in args: 
                     customer_full_name = args.pop("name")
                     name_parts = customer_full_name.split(maxsplit=1)
                     first_name = name_parts[0]
@@ -1092,7 +1327,6 @@ if application == "MCP Application":
                     read_args = {"first_name": first_name, "last_name": last_name}
                     read_result = call_mcp_tool(tool, "read", read_args)
                     if isinstance(read_result, dict) and "result" in read_result and read_result["result"]:
-                        # Find exact match
                         matches = [r for r in read_result["result"] if
                                    r.get("FirstName", "").lower() == first_name.lower() and
                                    r.get("LastName", "").lower() == last_name.lower()]
@@ -1100,8 +1334,8 @@ if application == "MCP Application":
                             args["customer_id"] = matches[0]["Id"]
                             p["args"] = args
                 
-                if "customer_id" not in args and "name" in args: # Fallback if name not split correctly
-                    read_args = {"name": args["name"]} # This name is actually full name
+                if "customer_id" not in args and "name" in args: 
+                    read_args = {"name": args["name"]} 
                     read_result = call_mcp_tool(tool, "read", read_args)
                     if isinstance(read_result, dict) and "result" in read_result:
                         matches = [r for r in read_result["result"] if
@@ -1111,9 +1345,9 @@ if application == "MCP Application":
                             p["args"] = args
 
                 if "new_email" not in args:
-                    possible_email = extract_email(user_query)
+                    possible_email = re.search(r'to\s+([\w\.-]+@[\w\.-]+)', user_query, re.IGNORECASE)
                     if possible_email:
-                        args["new_email"] = possible_email
+                        args["new_email"] = possible_email.group(1)
                         p["args"] = args
 
             # PostgreSQL: update by name
@@ -1133,9 +1367,19 @@ if application == "MCP Application":
                         args["name"] = m.group(1).strip()
                         p["args"] = args
                 if "new_price" not in args:
-                    possible_price = extract_price(user_query)
-                    if possible_price is not None:
-                        args['new_price'] = possible_price
+                    possible_price = re.search(r'(?:to|=)\s*\$?(\d+(?:\.\d+)?)', user_query)
+                    if possible_price:
+                        args['new_price'] = float(possible_price.group(1))
+                        p["args"] = args
+                if "new_launch_date" not in args:
+                    possible_date = re.search(r'(?:date to|on)\s+(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})', user_query, re.IGNORECASE)
+                    if possible_date:
+                        date_str = possible_date.group(1)
+                        # Convert DD-MM-YYYY to YYYY-MM-DD for server
+                        if re.match(r'\d{2}-\d{2}-\d{4}', date_str):
+                            day, month, year = date_str.split('-')
+                            date_str = f"{year}-{month}-{day}"
+                        args['new_launch_date'] = date_str
                         p["args"] = args
 
             if tool == "postgresql_crud" and action == "delete":
@@ -1160,13 +1404,10 @@ if application == "MCP Application":
                             if matches:
                                 args["product_id"] = matches[0]["id"]
                                 p["args"] = args
+            
+            # If all checks pass, execute the tool call
+            try_execute_tool_call(p, user_query, current_llm_model, selected_display_option)
 
-            # NEW: Pass selected display option to sales_crud if it's a read operation
-            if action == "read" and tool == "sales_crud":
-                args["display_format"] = st.session_state.get("display_option_select", "Default Formatting")
-                p["args"] = args # Update p with the new args
-
-            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
             assistant_message = {
@@ -1180,30 +1421,38 @@ if application == "MCP Application":
                 "format": "text",
             })
             st.session_state.messages.append(assistant_message)
-        else:
-            st.session_state.messages.append({
-                "role": "user",
-                "content": user_query,
-                "format": "text",
-            })
-            for step in user_steps:
-                st.session_state.messages.append(step)
-            if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-                reply, fmt = raw, "sql_crud"
-            else:
-                reply, fmt = format_natural(raw), "text"
+        st.rerun()  # Rerun so chat output appears
+
+    # ========== Function to execute tool call and update messages ==========
+    def try_execute_tool_call(p: dict, user_query: str, current_llm_model: str, selected_display_option: str):
+        try:
+            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
+        except Exception as e:
+            reply, fmt = f"⚠️ Error calling tool '{p.get('tool')}': {e}", "text"
             assistant_message = {
                 "role": "assistant",
                 "content": reply,
                 "format": fmt,
-                "request": p,
-                "tool": p.get("tool"),
-                "action": p.get("action"),
-                "args": p.get("args"),
-                "user_query": user_query,  # Added user_query to the message
             }
             st.session_state.messages.append(assistant_message)
-        st.rerun()  # Rerun so chat output appears
+            return
+
+        if isinstance(raw, dict) and "sql" in raw and "result" in raw:
+            reply_content, fmt = raw, "sql_crud"
+        else:
+            reply_content, fmt = format_natural(raw, selected_display_option), "text" # Apply formatting here
+
+        assistant_message = {
+            "role": "assistant",
+            "content": reply_content,
+            "format": fmt,
+            "request": p,
+            "tool": p.get("tool"),
+            "action": p.get("action"),
+            "args": p.get("args"),
+            "user_query": user_query,
+        }
+        st.session_state.messages.append(assistant_message)
 
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
     components.html("""
