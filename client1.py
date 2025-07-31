@@ -625,6 +625,14 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
         if llm_model.startswith("Groq"):
             client = Groq(api_key=os.getenv("GROQ_API_KEY"))
             model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+            )
         else: # Fallback to OpenAI if not Groq (or other future LLMs)
             openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             model_name = llm_model.lower().replace(" ", "-") # Adjust model name for OpenAI
@@ -673,6 +681,9 @@ async def _invoke_tool(tool: str, action: str, args: dict) -> any:
     transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}")
     async with Client(transport) as client:
         payload = {"operation": action, **{k: v for k, v in args.items() if k != "operation"}}
+        # --- DEBUG PRINT ADDED HERE ---
+        st.write(f"DEBUG: Payload being sent to MCP tool '{tool}': {payload}")
+        # --- END DEBUG PRINT ---
         res_obj = await client.call_tool(tool, payload)
     if res_obj.structured_content is not None:
         return res_obj.structured_content
@@ -1154,13 +1165,29 @@ if application == "MCP Application":
                         for row in updated_table["result"]:
                             if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
                                 continue
+                            if selected_display_option == "Null Value Removal/Handling" and "Email" in row and (row["Email"] is None or row["Email"] == "N/A"):
+                                continue
                             filtered_data.append(row)
 
                         # Now apply formatting to the filtered data
-                        formatted_table_data = [
-                            ast.literal_eval(format_natural(row, selected_display_option).replace(":", ": ").replace("'", "\""))
-                            for row in filtered_data
-                        ]
+                        formatted_table_data = []
+                        for row in filtered_data:
+                            try:
+                                # ast.literal_eval expects a string representation of a Python literal (like a dict or list)
+                                # format_natural returns a string like "Key: Value, Key2: Value2"
+                                # We need to convert this back to a dict for DataFrame, so we need to parse it.
+                                # A simple way is to make it look like a dict string and then eval it.
+                                # This is a bit hacky, but given the current format_natural output, it's a workaround.
+                                # A better long-term solution would be for format_natural to return a dict directly for table display.
+                                formatted_str = format_natural(row, selected_display_option)
+                                # Convert "Key: Value, Key2: Value2" into "{'Key': 'Value', 'Key2': 'Value2'}"
+                                # This is a fragile conversion, assuming no commas or colons within values themselves.
+                                temp_dict_str = "{" + ", ".join([f"'{p.split(': ', 1)[0]}': '{p.split(': ', 1)[1]}'" for p in formatted_str.split(', ')]) + "}"
+                                formatted_table_data.append(ast.literal_eval(temp_dict_str))
+                            except Exception as e:
+                                st.warning(f"Failed to parse formatted row for table display: {e}. Original formatted string: {formatted_str}")
+                                formatted_table_data.append(row) # Fallback to raw row
+
                         updated_df = pd.DataFrame(formatted_table_data)
                         st.table(updated_df)
                 except Exception as fetch_err:
@@ -1174,7 +1201,16 @@ if application == "MCP Application":
                     # Null Value Removal/Handling for read operations (filtering)
                     if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
                         continue
-                    formatted_table_data.append(ast.literal_eval(format_natural(row, selected_display_option).replace(":", ": ").replace("'", "\"")))
+                    if selected_display_option == "Null Value Removal/Handling" and "Email" in row and (row["Email"] is None or row["Email"] == "N/A"):
+                        continue
+                    
+                    try:
+                        formatted_str = format_natural(row, selected_display_option)
+                        temp_dict_str = "{" + ", ".join([f"'{p.split(': ', 1)[0]}': '{p.split(': ', 1)[1]}'" for p in formatted_str.split(', ')]) + "}"
+                        formatted_table_data.append(ast.literal_eval(temp_dict_str))
+                    except Exception as e:
+                        st.warning(f"Failed to parse formatted row for table display: {e}. Original formatted string: {formatted_str}")
+                        formatted_table_data.append(row) # Fallback to raw row
                 
                 df = pd.DataFrame(formatted_table_data)
                 st.table(df)
@@ -1497,17 +1533,72 @@ if application == "MCP Application":
 
                 reply_content = {
                     "sql": raw["sql"],
-                    "result": [
-                        ast.literal_eval(format_natural(item, selected_display_option).replace(":", ": ").replace("'", "\""))
-                        for item in filtered_data
-                    ]
+                    "result": [] # Initialize as empty list
                 }
+                for item in filtered_data:
+                    try:
+                        # format_natural returns a string like "Key: Value, Key2: Value2."
+                        # We need to convert this back to a dictionary for display in st.table.
+                        formatted_str = format_natural(item, selected_display_option)
+                        
+                        # This regex attempts to parse "Key: Value" pairs from the string.
+                        # It's robust to spaces and handles the trailing period.
+                        parsed_dict = {}
+                        # Remove trailing period if present
+                        clean_str = formatted_str.strip()
+                        if clean_str.endswith('.'):
+                            clean_str = clean_str[:-1]
+
+                        pairs = re.findall(r"([^:]+):\s*([^,]+)(?:,\s*|$)", clean_str)
+                        for key_raw, value_raw in pairs:
+                            key = key_raw.strip().replace(" ", "_").lower() # Normalize key names
+                            value = value_raw.strip()
+                            # Attempt to convert to appropriate types if possible
+                            if value.replace('.', '', 1).isdigit(): # Check if it's a number (int or float)
+                                if '.' in value:
+                                    parsed_dict[key] = float(value)
+                                else:
+                                    parsed_dict[key] = int(value)
+                            elif value.lower() in ['true', 'false']:
+                                parsed_dict[key] = value.lower() == 'true'
+                            else:
+                                parsed_dict[key] = value
+                        
+                        reply_content["result"].append(parsed_dict)
+                    except Exception as e:
+                        st.warning(f"Failed to parse formatted row for table display: {e}. Original formatted string: {formatted_str}")
+                        reply_content["result"].append(item) # Fallback to raw item if parsing fails
+
             elif isinstance(raw["result"], dict):
                 # Apply formatting for single dictionary results (e.g., describe)
                 reply_content = {
                     "sql": raw["sql"],
-                    "result": ast.literal_eval(format_natural(raw["result"], selected_display_option).replace(":", ": ").replace("'", "\""))
+                    "result": {} # Initialize as empty dict
                 }
+                try:
+                    formatted_str = format_natural(raw["result"], selected_display_option)
+                    clean_str = formatted_str.strip()
+                    if clean_str.endswith('.'):
+                        clean_str = clean_str[:-1]
+                    
+                    parsed_dict = {}
+                    pairs = re.findall(r"([^:]+):\s*([^,]+)(?:,\s*|$)", clean_str)
+                    for key_raw, value_raw in pairs:
+                        key = key_raw.strip().replace(" ", "_").lower()
+                        value = value_raw.strip()
+                        if value.replace('.', '', 1).isdigit():
+                            if '.' in value:
+                                parsed_dict[key] = float(value)
+                            else:
+                                parsed_dict[key] = int(value)
+                        elif value.lower() in ['true', 'false']:
+                            parsed_dict[key] = value.lower() == 'true'
+                        else:
+                            parsed_dict[key] = value
+                    reply_content["result"] = parsed_dict
+                except Exception as e:
+                    st.warning(f"Failed to parse formatted dict for table display: {e}. Original formatted string: {formatted_str}")
+                    reply_content["result"] = raw["result"] # Fallback to raw dict
             else:
                 reply_content = raw # Fallback for non-list/dict results
             fmt = "sql_crud"
