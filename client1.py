@@ -8,7 +8,7 @@ from groq import Groq
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
-from datetime import datetime # Import datetime for date formatting
+from datetime import datetime, date # Import datetime and date for date formatting
 from decimal import Decimal, InvalidOperation # Import Decimal for precise decimal handling
 
 from dotenv import load_dotenv
@@ -625,11 +625,8 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
         if llm_model.startswith("Groq"):
             client = Groq(api_key=os.getenv("GROQ_API_KEY"))
             model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
-        else:
-            # Ensure OpenAI API key is available if an OpenAI model is selected
-            if not os.getenv("OPENAI_API_KEY"):
-                raise ValueError("OPENAI_API_KEY environment variable not set.")
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        else: # Fallback to OpenAI if not Groq (or other future LLMs)
+            openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             model_name = llm_model.lower().replace(" ", "-") # Adjust model name for OpenAI
 
         resp = client.chat.completions.create(
@@ -723,6 +720,13 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                         except ValueError:
                             pass # Keep original string if conversion fails
                     
+                    if "CreatedAt" in formatted_item and isinstance(formatted_item["CreatedAt"], str):
+                        try:
+                            dt_obj = datetime.fromisoformat(formatted_item["CreatedAt"])
+                            formatted_item["CreatedAt"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                        except ValueError:
+                            pass # Keep as is if not a valid ISO format
+
                 elif display_option == "Decimal Value Formatting":
                     for key in ["price", "unit_price", "total_price", "sales_amount"]:
                         if key in formatted_item and (isinstance(formatted_item[key], (float, Decimal, int))):
@@ -732,10 +736,11 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                                 pass # Keep as is if not a valid number
                 
                 elif display_option == "String Concatenation":
-                    if "first_name" in formatted_item and "last_name" in formatted_item:
-                        formatted_item["full_name"] = f"{formatted_item['first_name']} {formatted_item['last_name']}".strip()
-                        formatted_item.pop("first_name", None)
-                        formatted_item.pop("last_name", None)
+                    # FullName is now a generated column from DB, so it should already be there for customers
+                    if "FirstName" in formatted_item and "LastName" in formatted_item and "FullName" not in formatted_item:
+                        formatted_item["FullName"] = f"{formatted_item['FirstName']} {formatted_item['LastName']}".strip()
+                        formatted_item.pop("FirstName", None)
+                        formatted_item.pop("LastName", None)
                     
                     if "product_name" in formatted_item and "product_description_raw" in formatted_item and "product_category" in formatted_item:
                         formatted_item["product_full_description"] = (
@@ -765,13 +770,17 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                         formatted_item["product_category"] = "Uncategorized"
                     if "launch_date" in formatted_item and formatted_item["launch_date"] is None:
                         formatted_item["launch_date"] = "N/A"
+                    if "description" in formatted_item and formatted_item["description"] is None:
+                        formatted_item["description"] = "N/A"
+                    if "Email" in formatted_item and formatted_item["Email"] is None:
+                        formatted_item["Email"] = "N/A"
 
 
                 # Construct string representation of the formatted item
                 parts = []
                 for k, v in formatted_item.items():
                     # Skip raw first/last name if full_name is present
-                    if k in ["first_name", "last_name"] and "full_name" in formatted_item:
+                    if k in ["first_name", "last_name"] and "customer_full_name" in formatted_item:
                         continue
                     # Skip raw product description/category if product_full_description is present
                     if k in ["product_description_raw", "product_category"] and "product_full_description" in formatted_item:
@@ -783,7 +792,11 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                         parts.append(f"Launch Date: {v.strftime('%Y-%m-%d')}")
                     elif k == "product_launch_date" and isinstance(v, str): # For already converted strings
                         parts.append(f"Launch Date: {v}")
-                    elif k == "unit_price" or k == "total_price" or k == "sales_amount":
+                    elif k == "CreatedAt" and isinstance(v, (datetime, date)):
+                        parts.append(f"Created At: {v.strftime('%Y-%m-%d %H:%M:%S')}")
+                    elif k == "CreatedAt" and isinstance(v, str): # For already converted strings
+                        parts.append(f"Created At: {v}")
+                    elif k == "unit_price" or k == "total_price" or k == "sales_amount" or k == "price":
                         if isinstance(v, (float, Decimal, int)):
                             parts.append(f"{k.replace('_', ' ').title()}: ${v:.2f}")
                         else: # Already formatted string
@@ -826,6 +839,13 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                     formatted_item["product_launch_date"] = date_obj.strftime("%d-%m-%Y")
                 except ValueError:
                     pass
+            if "CreatedAt" in formatted_item and isinstance(formatted_item["CreatedAt"], str):
+                try:
+                    dt_obj = datetime.fromisoformat(formatted_item["CreatedAt"])
+                    formatted_item["CreatedAt"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
+
         elif display_option == "Decimal Value Formatting":
             for key in ["price", "unit_price", "total_price", "sales_amount"]:
                 if key in formatted_item and (isinstance(formatted_item[key], (float, Decimal, int))):
@@ -834,10 +854,10 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                     except InvalidOperation:
                         pass
         elif display_option == "String Concatenation":
-            if "first_name" in formatted_item and "last_name" in formatted_item:
-                formatted_item["full_name"] = f"{formatted_item['first_name']} {formatted_item['last_name']}".strip()
-                formatted_item.pop("first_name", None)
-                formatted_item.pop("last_name", None)
+            if "FirstName" in formatted_item and "LastName" in formatted_item and "FullName" not in formatted_item:
+                formatted_item["FullName"] = f"{formatted_item['FirstName']} {formatted_item['LastName']}".strip()
+                formatted_item.pop("FirstName", None)
+                formatted_item.pop("LastName", None)
             if "product_name" in formatted_item and "product_description_raw" in formatted_item and "product_category" in formatted_item:
                 formatted_item["product_full_description"] = (
                     f"{formatted_item['product_name']} "
@@ -861,11 +881,15 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                 formatted_item["product_category"] = "Uncategorized"
             if "launch_date" in formatted_item and formatted_item["launch_date"] is None:
                 formatted_item["launch_date"] = "N/A"
+            if "description" in formatted_item and formatted_item["description"] is None:
+                formatted_item["description"] = "N/A"
+            if "Email" in formatted_item and formatted_item["Email"] is None:
+                formatted_item["Email"] = "N/A"
 
 
         parts = []
         for k, v in formatted_item.items():
-            if k in ["first_name", "last_name"] and "full_name" in formatted_item:
+            if k in ["first_name", "last_name"] and "customer_full_name" in formatted_item:
                 continue
             if k in ["product_description_raw", "product_category"] and "product_full_description" in formatted_item:
                 continue
@@ -876,7 +900,11 @@ def format_natural(data, display_option: str = "Default Formatting") -> str:
                 parts.append(f"Launch Date: {v.strftime('%Y-%m-%d')}")
             elif k == "product_launch_date" and isinstance(v, str):
                 parts.append(f"Launch Date: {v}")
-            elif k == "unit_price" or k == "total_price" or k == "sales_amount":
+            elif k == "CreatedAt" and isinstance(v, (datetime, date)):
+                parts.append(f"Created At: {v.strftime('%Y-%m-%d %H:%M:%S')}")
+            elif k == "CreatedAt" and isinstance(v, str):
+                parts.append(f"Created At: {v}")
+            elif k == "unit_price" or k == "total_price" or k == "sales_amount" or k == "price":
                 if isinstance(v, (float, Decimal, int)):
                     parts.append(f"{k.replace('_', ' ').title()}: ${v:.2f}")
                 else:
@@ -1077,7 +1105,7 @@ if application == "MCP Application":
             action = msg.get("action", "")
             tool = msg.get("tool", "")
             user_query = msg.get("user_query", "")
-            current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") # Get selected LLM model
+            current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") 
             selected_display_option = st.session_state.get("display_option_select", "Default Formatting")
 
             with st.expander("Details"):
@@ -1121,9 +1149,17 @@ if application == "MCP Application":
                     updated_table = call_mcp_tool(read_tool, "read", read_args)
                     if isinstance(updated_table, dict) and "result" in updated_table:
                         # Apply formatting to the displayed table
+                        # Filter out records with null email if Null Value Removal/Handling is selected
+                        filtered_data = []
+                        for row in updated_table["result"]:
+                            if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
+                                continue
+                            filtered_data.append(row)
+
+                        # Now apply formatting to the filtered data
                         formatted_table_data = [
-                            ast.literal_eval(format_natural(row, selected_display_option).replace(":", ": ").replace("'", "\"")) # Convert to dict and then back to string for ast.literal_eval
-                            for row in updated_table["result"]
+                            ast.literal_eval(format_natural(row, selected_display_option).replace(":", ": ").replace("'", "\""))
+                            for row in filtered_data
                         ]
                         updated_df = pd.DataFrame(formatted_table_data)
                         st.table(updated_df)
@@ -1235,6 +1271,15 @@ if application == "MCP Application":
                                 extracted_value = float(extracted_value)
                             except ValueError:
                                 extracted_value = None # Failed to convert to number
+                        # Handle date format for launch_date if it's the pending field
+                        if field_name == "launch_date" and extracted_value:
+                            try:
+                                # Convert DD-MM-YYYY to YYYY-MM-DD for server
+                                if re.match(r'\d{2}-\d{2}-\d{4}', extracted_value):
+                                    day, month, year = extracted_value.split('-')
+                                    extracted_value = f"{year}-{month}-{day}"
+                            except Exception:
+                                pass # Keep original if conversion fails
                         st.session_state.pending_tool_call["args"][field_name] = extracted_value
 
             if extracted_value is not None:
@@ -1426,6 +1471,7 @@ if application == "MCP Application":
     # ========== Function to execute tool call and update messages ==========
     def try_execute_tool_call(p: dict, user_query: str, current_llm_model: str, selected_display_option: str):
         try:
+            # Do NOT pass display_format to the server
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
         except Exception as e:
             reply, fmt = f"⚠️ Error calling tool '{p.get('tool')}': {e}", "text"
@@ -1438,7 +1484,33 @@ if application == "MCP Application":
             return
 
         if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-            reply_content, fmt = raw, "sql_crud"
+            # For SQL CRUD results, apply formatting to the 'result' part
+            if isinstance(raw["result"], list):
+                # Filter out records with null email if Null Value Removal/Handling is selected
+                filtered_data = []
+                for row in raw["result"]:
+                    if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
+                        continue
+                    if selected_display_option == "Null Value Removal/Handling" and "Email" in row and (row["Email"] is None or row["Email"] == "N/A"):
+                        continue
+                    filtered_data.append(row)
+
+                reply_content = {
+                    "sql": raw["sql"],
+                    "result": [
+                        ast.literal_eval(format_natural(item, selected_display_option).replace(":", ": ").replace("'", "\""))
+                        for item in filtered_data
+                    ]
+                }
+            elif isinstance(raw["result"], dict):
+                # Apply formatting for single dictionary results (e.g., describe)
+                reply_content = {
+                    "sql": raw["sql"],
+                    "result": ast.literal_eval(format_natural(raw["result"], selected_display_option).replace(":", ": ").replace("'", "\""))
+                }
+            else:
+                reply_content = raw # Fallback for non-list/dict results
+            fmt = "sql_crud"
         else:
             reply_content, fmt = format_natural(raw, selected_display_option), "text" # Apply formatting here
 
