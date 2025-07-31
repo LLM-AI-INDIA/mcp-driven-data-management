@@ -4,7 +4,6 @@ import streamlit as st
 import base64
 from io import BytesIO
 from PIL import Image
-# from openai import OpenAI # REMOVED: OpenAI import
 from groq import Groq # NEW: Groq import
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
@@ -258,7 +257,7 @@ st.markdown("""
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://0.0.0.0:8000')}/mcp/")
+        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000')}") # Removed /mcp here
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
@@ -328,7 +327,7 @@ with st.sidebar:
             default_tool = list(st.session_state.available_tools.keys())[0] if st.session_state.available_tools else ""
             server_tools_index = server_tools_options.index(default_tool) if default_tool else 0
         else:
-            server_tools_options = ["", "sqlserver_crud", "postgresql_crud"]  # Fallback
+            server_tools_options = ["", "sqlserver_crud", "postgresql_crud", "sales_crud"]  # Fallback
             server_tools_index = 0
 
         server_tools = st.selectbox(
@@ -438,7 +437,11 @@ if "available_tools" not in st.session_state:
 
 # Initialize MCP_SERVER_URL in session state
 if "MCP_SERVER_URL" not in st.session_state:
-    st.session_state["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+    st.session_state["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") # Changed default to include /mcp
+
+# ADD THIS NEW LINE:
+st.sidebar.info(f"Client trying to connect to: {st.session_state['MCP_SERVER_URL']}")
+
 
 # Initialize tool_states dynamically based on discovered tools
 if "tool_states" not in st.session_state:
@@ -565,41 +568,40 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
 
         "TOOL SELECTION GUIDELINES:\n"
         "- Analyze the user's business intent and match it with the most relevant tool description\n"
-        "- Consider what type of data the user is asking about:\n"
-        "  * Customer data: names, emails, contact information, customer management\n"
-        "  * Product data: inventory, catalog, pricing, product details\n"
-        "  * Sales data: transactions, orders, revenue, purchase history, analytics\n"
-        "- Choose the tool whose description best matches the user's request\n"
-        "- For sales queries, prioritize tools that handle transaction and sales data\n"
-        "- If multiple tools could work, choose the most specific one for the business context\n\n"
+        "- **Prioritize tools based on the primary data type being requested:**\n"
+        "  * **Customers:** Use `sqlserver_crud` for managing customer records (e.g., 'add customer', 'list customers', 'update customer email').\n"
+        "  * **Products:** Use `postgresql_crud` for managing product inventory and details (e.g., 'add product', 'list products', 'update product price').\n"
+        "  * **Sales Transactions:** Use `sales_crud` for recording, reading, updating, or deleting sales and order history. This tool interacts with both customer and product data to complete a sale (e.g., 'record a sale', 'list sales', 'update sale quantity').\n"
+        "- If a query involves both customer and product information but is primarily about a *transaction*, use `sales_crud`.\n"
+        "- If multiple tools could work, choose the most specific one for the business context.\n\n"
 
         "SALES-SPECIFIC ROUTING:\n"
-        "- 'show sales', 'list transactions', 'revenue report' → Use sales/transaction tools\n"
-        "- 'customer purchases', 'order history' → Use sales tools with customer context\n"
-        "- 'product sales', 'top selling items' → Use sales tools with product context\n"
-        "- 'create order', 'new sale' → Use sales creation tools\n"
-        "- 'customer list', 'add customer' → Use customer management tools\n"
-        "- 'product catalog', 'inventory' → Use product management tools\n\n"
+        "- 'show sales', 'list transactions', 'revenue report' → Use `sales_crud`\n"
+        "- 'customer purchases', 'order history' → Use `sales_crud` with customer context\n"
+        "- 'product sales', 'top selling items' → Use `sales_crud` with product context\n"
+        "- 'create order', 'new sale' → Use `sales_crud`\n"
+        "- 'customer list', 'add customer', 'update customer email' → Use `sqlserver_crud`\n"
+        "- 'product catalog', 'inventory', 'add product', 'update product price' → Use `postgresql_crud`\n\n"
 
         "ARGUMENT EXTRACTION:\n"
         "- Extract relevant business parameters from the user query\n"
-        "- For updates: include fields like 'new_email', 'new_price', 'new_quantity', etc.\n"
-        "- For describe: include 'table_name' if mentioned\n"
-        "- For specific records: include identifiers like 'name', 'id', 'customer_id', 'product_id'\n"
-        "- For sales: include 'customer_id', 'product_id', 'quantity', 'unit_price', 'total_amount'\n"
-        "- For date ranges: include 'start_date', 'end_date' if mentioned\n\n"
+        "- For `sqlserver_crud` (customers): Use `first_name`, `last_name`, `email`, `customer_id`, `new_email`.\n"
+        "- For `postgresql_crud` (products): Use `name`, `price`, `description`, `product_id`, `new_price`, `new_quantity`, `sales_amount`.\n"
+        "- For `sales_crud` (sales): Use `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`.\n"
+        "- For `describe`: include 'table_name' if mentioned (e.g., 'Customers', 'products', 'Sales').\n\n"
 
         f"AVAILABLE TOOLS:\n{tools_description}\n\n"
 
         "BUSINESS EXAMPLES:\n"
-        "Query: 'list all customers' → Analyze which tool handles customer data\n"
-        "Query: 'show product inventory' → Analyze which tool handles product data\n"
-        "Query: 'display sales report' → Analyze which tool handles sales/transaction data\n"
-        "Query: 'create new order for customer John' → Find sales tool, extract customer info\n"
-        "Query: 'update email for John' → Find customer tool, extract name and action\n"
-        "Query: 'delete product widget' → Find product tool, extract product name\n"
-        "Query: 'show top selling products' → Find sales tool for analytics\n"
-        "Query: 'customer purchase history' → Find sales tool with customer context\n"
+        "Query: 'list all customers' → {\"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": {}}\n"
+        "Query: 'add customer John Doe with email john@example.com' → {\"tool\": \"sqlserver_crud\", \"action\": \"create\", \"args\": {\"first_name\": \"John\", \"last_name\": \"Doe\", \"email\": \"john@example.com\"}}\n"
+        "Query: 'show product inventory' → {\"tool\": \"postgresql_crud\", \"action\": \"read\", \"args\": {}}\n"
+        "Query: 'add product Laptop for $1200' → {\"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": {\"name\": \"Laptop\", \"price\": 1200.0}}\n"
+        "Query: 'display sales report' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {}}\n"
+        "Query: 'record a sale for customer 1 and product 2, quantity 5, unit price 14.99' → {\"tool\": \"sales_crud\", \"action\": \"create\", \"args\": {\"customer_id\": 1, \"product_id\": 2, \"quantity\": 5, \"unit_price\": 14.99}}\n"
+        "Query: 'update email for customer 1 to new@example.com' → {\"tool\": \"sqlserver_crud\", \"action\": \"update\", \"args\": {\"customer_id\": 1, \"new_email\": \"new@example.com\"}}\n"
+        "Query: 'update product 1 price to 10.50' → {\"tool\": \"postgresql_crud\", \"action\": \"update\", \"args\": {\"product_id\": 1, \"new_price\": 10.50}}\n"
+        "Query: 'update sale 1 quantity to 12' → {\"tool\": \"sales_crud\", \"action\": \"update\", \"args\": {\"sale_id\": 1, \"new_quantity\": 12}}\n"
     )
 
     prompt = f"User query: \"{query}\"\n\nAs a sales agent, analyze the query and select the most appropriate tool based on the descriptions above. Consider the business context and data relationships. Respond with JSON only."
@@ -609,6 +611,9 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
             client = Groq(api_key=os.getenv("GROQ_API_KEY"))
             model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
         else:
+            # Ensure OpenAI API key is available if an OpenAI model is selected
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("OPENAI_API_KEY environment variable not set.")
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             model_name = llm_model.lower().replace(" ", "-") # Adjust model name for OpenAI
 
@@ -632,10 +637,11 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
         if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
             result["action"] = "read"
 
-        # Validate tool selection
+        # Validate tool selection - if the LLM picks a non-existent tool, this will prevent errors
         if "tool" in result and result["tool"] not in available_tools:
-            # Fallback to first available tool if selection is invalid
-            result["tool"] = list(available_tools.keys())[0]
+            # Fallback or error handling for invalid tool selection
+            return {"error": f"LLM selected an invalid tool: '{result['tool']}'. Please refine your query.", "tool_selection_error": True}
+
 
         return result
 
@@ -643,7 +649,7 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
         # Fallback response if LLM call fails
         st.error(f"LLM Parsing Error: {e}") # Display error for debugging
         return {
-            "tool": list(available_tools.keys())[0] if available_tools else None,
+            "tool": list(available_tools.keys())[0] if available_tools else None, # Fallback to first available tool
             "action": "read",
             "args": {},
             "error": f"Failed to parse query: {str(e)}"
@@ -651,7 +657,8 @@ def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict:
 
 
 async def _invoke_tool(tool: str, action: str, args: dict) -> any:
-    transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}/mcp")
+    # Ensure the URL is correctly formed for MCP server endpoint
+    transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}")
     async with Client(transport) as client:
         payload = {"operation": action, **{k: v for k, v in args.items() if k != "operation"}}
         res_obj = await client.call_tool(tool, payload)
@@ -800,6 +807,9 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
             client = Groq(api_key=os.getenv("GROQ_API_KEY"))
             model_name = llm_model.split(" - ")[1] # Extract model name
         else:
+            # Ensure OpenAI API key is available if an OpenAI model is selected
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("OPENAI_API_KEY environment variable not set.")
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             model_name = llm_model.lower().replace(" ", "-") # Adjust model name
 
@@ -825,15 +835,8 @@ if application == "MCP Application":
 
     # Removed direct OpenAI client init here, moved to functions
     # openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) 
-    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") # Updated default
     st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
-
-    # Discover tools dynamically if not already done
-    if not st.session_state.available_tools:
-        with st.spinner("Discovering available tools..."):
-            discovered_tools = discover_tools()
-            st.session_state.available_tools = discovered_tools
-            st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
 
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
@@ -855,7 +858,7 @@ if application == "MCP Application":
         st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
         if st.button("🔄 Refresh", key="refresh_tools_main", help="Rediscover available tools"):
             with st.spinner("Refreshing tools..."):
-                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") # Updated default
                 st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
                 discovered_tools = discover_tools()
                 st.session_state.available_tools = discovered_tools
@@ -1005,9 +1008,9 @@ if application == "MCP Application":
         # --- MIDDLE: Input Box ---
         with chatbar_cols[1]:
             user_query_input = st.text_input(
-                "How can I help you today?",
+                "",
                 placeholder="How can I help you today?",
-                label_visibility="hidden",
+                label_visibility="collapsed",
                 key="chat_input_box"
             )
 
@@ -1050,6 +1053,11 @@ if application == "MCP Application":
 
             # Pass the selected LLM model to parse_user_query
             p = parse_user_query(user_query, st.session_state.available_tools, current_llm_model)
+            
+            # Check if LLM returned an error during tool selection
+            if "error" in p and p.get("tool_selection_error"):
+                raise Exception(p["error"])
+
             tool = p.get("tool")
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
@@ -1063,18 +1071,14 @@ if application == "MCP Application":
             p["args"] = args
 
             # Special handling for customer_name to split into first_name and last_name
-            if "name" in args and tool == "sales_crud" and action in ["create", "update"]:
-                customer_full_name = args.pop("name")
-                name_parts = customer_full_name.split(maxsplit=1)
-                args["first_name"] = name_parts[0]
-                args["last_name"] = name_parts[1] if len(name_parts) > 1 else ""
-                p["args"] = args
-
-            if action == "describe" and "table_name" in args:
-                if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
-                    args["table_name"] = "Customers"
-                if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
-                    args["table_name"] = "products"
+            # This logic should apply only to sqlserver_crud (Customers)
+            if tool == "sqlserver_crud" and action == "create":
+                if "name" in args: # If user provides full name for create
+                    customer_full_name = args.pop("name")
+                    name_parts = customer_full_name.split(maxsplit=1)
+                    args["first_name"] = name_parts[0]
+                    args["last_name"] = name_parts[1] if len(name_parts) > 1 else ""
+                    p["args"] = args
 
             # SQL Server: update by name
             if tool == "sqlserver_crud" and action == "update":
