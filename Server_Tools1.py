@@ -315,8 +315,8 @@ def find_customer_by_name(name: str) -> dict:
 
         # Try partial match on first name, last name, or full name
         mysql_cur.execute("""
-            SELECT Id, Name FROM Customers 
-            WHERE LOWER(FirstName) = LOWER(%s) 
+            SELECT Id, Name FROM Customers
+            WHERE LOWER(FirstName) = LOWER(%s)
                OR LOWER(LastName) = LOWER(%s)
                OR LOWER(Name) LIKE LOWER(%s)
         """, (name, name, f"%{name}%"))
@@ -423,7 +423,9 @@ def execute_sales_operation_with_where(operation: str, where_condition: str, **k
 # ————————————————
 # 7. Enhanced MySQL CRUD Tool (Customers) with Smart Name Resolution
 # ————————————————
-@mcp.tool(name="CustomerManagement", description="Create, list, update, or delete customers in the MySQL customer database")
+# You will need to define: get_mysql_conn(), get_pg_conn(), find_customer_by_name(), find_product_by_name(), etc.
+
+@mcp.tool(name="CustomerManagement", description="Create, list, update, or delete customers in the MySQL customer database. Handles keywords like customer name, email, and ID.")
 async def sqlserver_crud(
         operation: str,
         name: str = None,
@@ -431,17 +433,32 @@ async def sqlserver_crud(
         limit: int = 10,
         customer_id: int = None,
         new_email: str = None,
+        new_last_name: str = None,
+        customer_first_name: str = None,
+        customer_last_name: str = None,
+        customer_email: str = None,
         table_name: str = None,
 ) -> Any:
     cnxn = get_mysql_conn()
     cur = cnxn.cursor()
+
+    # 🔁 Normalize alternate fields
+    if customer_first_name or customer_last_name:
+        first = customer_first_name or ""
+        last = customer_last_name or ""
+        name = f"{first} {last}".strip()
+    if customer_email:
+        email = customer_email
+    if new_last_name:
+        name = name or ""
+        name_parts = name.split(' ', 1)
+        name = f"{name_parts[0]} {new_last_name}"
 
     if operation == "create":
         if not name or not email:
             cnxn.close()
             return {"sql": None, "result": "❌ 'name' and 'email' required for create."}
 
-        # Split name into first and last name (simple split)
         name_parts = name.split(' ', 1)
         first_name = name_parts[0]
         last_name = name_parts[1] if len(name_parts) > 1 else ""
@@ -453,44 +470,37 @@ async def sqlserver_crud(
         return {"sql": sql_query, "result": f"✅ Customer '{name}' added."}
 
     elif operation == "read":
-        # Handle filtering by name if provided
         if name:
             sql_query = """
-                        SELECT Id, FirstName, LastName, Name, Email, CreatedAt
-                        FROM Customers
-                        WHERE LOWER(Name) LIKE LOWER(%s) 
-                           OR LOWER(FirstName) LIKE LOWER(%s)
-                           OR LOWER(LastName) LIKE LOWER(%s)
-                        ORDER BY Id ASC
-                        LIMIT %s
-                        """
+                SELECT Id, FirstName, LastName, Name, Email, CreatedAt
+                FROM Customers
+                WHERE LOWER(Name) LIKE LOWER(%s)
+                   OR LOWER(FirstName) LIKE LOWER(%s)
+                   OR LOWER(LastName) LIKE LOWER(%s)
+                ORDER BY Id ASC
+                LIMIT %s
+            """
             cur.execute(sql_query, (f"%{name}%", f"%{name}%", f"%{name}%", limit))
         else:
             sql_query = """
-                        SELECT Id, FirstName, LastName, Name, Email, CreatedAt
-                        FROM Customers
-                        ORDER BY Id ASC
-                        LIMIT %s
-                        """
+                SELECT Id, FirstName, LastName, Name, Email, CreatedAt
+                FROM Customers
+                ORDER BY Id ASC
+                LIMIT %s
+            """
             cur.execute(sql_query, (limit,))
 
         rows = cur.fetchall()
         result = [
             {
-                "Id": r[0],
-                "FirstName": r[1],
-                "LastName": r[2],
-                "Name": r[3],
-                "Email": r[4],
-                "CreatedAt": r[5].isoformat()
-            }
-            for r in rows
+                "Id": r[0], "FirstName": r[1], "LastName": r[2],
+                "Name": r[3], "Email": r[4], "CreatedAt": r[5].isoformat()
+            } for r in rows
         ]
         cnxn.close()
         return {"sql": sql_query, "result": result}
 
     elif operation == "update":
-        # Enhanced update: resolve customer_id from name if not provided
         if not customer_id and name:
             customer_info = find_customer_by_name(name)
             if not customer_info["found"]:
@@ -500,13 +510,12 @@ async def sqlserver_crud(
 
         if not customer_id or not new_email:
             cnxn.close()
-            return {"sql": None, "result": "❌ 'customer_id' (or 'name') and 'new_email' required for update."}
+            return {"sql": None, "result": "❌ 'customer_id' (or 'name') and 'new_email' required."}
 
         sql_query = "UPDATE Customers SET Email = %s WHERE Id = %s"
         cur.execute(sql_query, (new_email, customer_id))
         cnxn.commit()
 
-        # Get updated customer name for response
         cur.execute("SELECT Name FROM Customers WHERE Id = %s", (customer_id,))
         customer_name = cur.fetchone()
         customer_name = customer_name[0] if customer_name else f"Customer {customer_id}"
@@ -515,7 +524,6 @@ async def sqlserver_crud(
         return {"sql": sql_query, "result": f"✅ Customer '{customer_name}' email updated to '{new_email}'."}
 
     elif operation == "delete":
-        # Enhanced delete: resolve customer_id from name if not provided
         if not customer_id and name:
             customer_info = find_customer_by_name(name)
             if not customer_info["found"]:
@@ -524,7 +532,6 @@ async def sqlserver_crud(
             customer_id = customer_info["id"]
             customer_name = customer_info["name"]
         elif customer_id:
-            # Get customer name for response
             cur.execute("SELECT Name FROM Customers WHERE Id = %s", (customer_id,))
             result = cur.fetchone()
             customer_name = result[0] if result else f"Customer {customer_id}"
@@ -545,14 +552,9 @@ async def sqlserver_crud(
         rows = cur.fetchall()
         result = [
             {
-                "Field": r[0],
-                "Type": r[1],
-                "Null": r[2],
-                "Key": r[3],
-                "Default": r[4],
-                "Extra": r[5]
-            }
-            for r in rows
+                "Field": r[0], "Type": r[1], "Null": r[2],
+                "Key": r[3], "Default": r[4], "Extra": r[5]
+            } for r in rows
         ]
         cnxn.close()
         return {"sql": sql_query, "result": result}
@@ -561,10 +563,10 @@ async def sqlserver_crud(
         cnxn.close()
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
-
 # ————————————————
 # 8. Enhanced PostgreSQL CRUD Tool (Products) with Smart Name Resolution
 # ————————————————
+
 @mcp.tool(name="ProductManagement", description="Manage products in the PostgreSQL products database: add, list, update, or delete")
 async def postgresql_crud(
         operation: str,
@@ -574,7 +576,7 @@ async def postgresql_crud(
         limit: int = 10,
         product_id: int = None,
         new_price: float = None,
-        table_name: str = None,
+        table_name: str = None
 ) -> Any:
     cnxn = get_pg_conn()
     cur = cnxn.cursor()
@@ -583,6 +585,7 @@ async def postgresql_crud(
         if not name or price is None:
             cnxn.close()
             return {"sql": None, "result": "❌ 'name' and 'price' required for create."}
+
         sql_query = "INSERT INTO products (name, price, description) VALUES (%s, %s, %s)"
         cur.execute(sql_query, (name, price, description))
         cnxn.commit()
@@ -591,23 +594,22 @@ async def postgresql_crud(
         return {"sql": sql_query, "result": result}
 
     elif operation == "read":
-        # Handle filtering by name if provided
         if name:
             sql_query = """
-                        SELECT id, name, price, description
-                        FROM products
-                        WHERE LOWER(name) LIKE LOWER(%s)
-                        ORDER BY id ASC
-                        LIMIT %s
-                        """
+                SELECT id, name, price, description
+                FROM products
+                WHERE LOWER(name) LIKE LOWER(%s)
+                ORDER BY id ASC
+                LIMIT %s
+            """
             cur.execute(sql_query, (f"%{name}%", limit))
         else:
             sql_query = """
-                        SELECT id, name, price, description
-                        FROM products
-                        ORDER BY id ASC
-                        LIMIT %s
-                        """
+                SELECT id, name, price, description
+                FROM products
+                ORDER BY id ASC
+                LIMIT %s
+            """
             cur.execute(sql_query, (limit,))
 
         rows = cur.fetchall()
@@ -619,7 +621,6 @@ async def postgresql_crud(
         return {"sql": sql_query, "result": result}
 
     elif operation == "update":
-        # Enhanced update: resolve product_id from name if not provided
         if not product_id and name:
             product_info = find_product_by_name(name)
             if not product_info["found"]:
@@ -629,13 +630,12 @@ async def postgresql_crud(
 
         if not product_id or new_price is None:
             cnxn.close()
-            return {"sql": None, "result": "❌ 'product_id' (or 'name') and 'new_price' required for update."}
+            return {"sql": None, "result": "❌ 'product_id' (or 'name') and 'new_price' required."}
 
         sql_query = "UPDATE products SET price = %s WHERE id = %s"
         cur.execute(sql_query, (new_price, product_id))
         cnxn.commit()
 
-        # Get updated product name for response
         cur.execute("SELECT name FROM products WHERE id = %s", (product_id,))
         product_name = cur.fetchone()
         product_name = product_name[0] if product_name else f"Product {product_id}"
@@ -644,7 +644,6 @@ async def postgresql_crud(
         return {"sql": sql_query, "result": f"✅ Product '{product_name}' price updated to ${new_price:.2f}."}
 
     elif operation == "delete":
-        # Enhanced delete: resolve product_id from name if not provided
         if not product_id and name:
             product_info = find_product_by_name(name)
             if not product_info["found"]:
@@ -653,7 +652,6 @@ async def postgresql_crud(
             product_id = product_info["id"]
             product_name = product_info["name"]
         elif product_id:
-            # Get product name for response
             cur.execute("SELECT name FROM products WHERE id = %s", (product_id,))
             result = cur.fetchone()
             product_name = result[0] if result else f"Product {product_id}"
@@ -670,11 +668,11 @@ async def postgresql_crud(
     elif operation == "describe":
         table = table_name or "products"
         sql_query = f"""
-                    SELECT column_name, data_type, is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s
-                    ORDER BY ordinal_position
-                    """
+            SELECT column_name, data_type, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_name = %s
+            ORDER BY ordinal_position
+        """
         cur.execute(sql_query, (table,))
         rows = cur.fetchall()
         result = [
@@ -683,8 +681,7 @@ async def postgresql_crud(
                 "Type": r[1],
                 "Nullable": r[2],
                 "Default": r[3]
-            }
-            for r in rows
+            } for r in rows
         ]
         cnxn.close()
         return {"sql": sql_query, "result": result}
@@ -693,33 +690,30 @@ async def postgresql_crud(
         cnxn.close()
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
-
 # ————————————————
 # 9. Enhanced Sales CRUD Tool with Column Filtering and WHERE Clause Support
 # ————————————————
-@mcp.tool(name="SalesManagement", description="Manage sales records across customers and products: create, update, delete, query sales in PostgreSQL")
+@mcp.tool(name="SalesManagement", description="Manage sales records across customers and products: create, update, delete, query sales in PostgreSQL and MySQL")
 async def sales_crud(
-        operation: str,
-        customer_id: int = None,
-        product_id: int = None,
-        quantity: int = 1,
-        unit_price: float = None,
-        total_amount: float = None,
-        sale_id: int = None,
-        new_quantity: int = None,
-        table_name: str = None,
-        display_format: str = None,
-        customer_name: str = None,
-        product_name: str = None,
-        email: str = None,
-        total_price: float = None,
-        columns: str = None,  # NEW: Comma-separated list of columns to return
-        where_condition: str = None,  # NEW: WHERE clause for operations
-        new_price: float = None  # NEW: For price updates
+    operation: str,
+    customer_id: int = None,
+    product_id: int = None,
+    quantity: int = 1,
+    unit_price: float = None,
+    total_amount: float = None,
+    sale_id: int = None,
+    new_quantity: int = None,
+    table_name: str = None,
+    display_format: str = None,
+    customer_name: str = None,
+    product_name: str = None,
+    email: str = None,
+    total_price: float = None,
+    columns: str = None,
+    where_condition: str = None,
+    new_price: float = None
 ) -> Any:
-    # For PostgreSQL sales operations (create, update, delete)
     if operation in ["create", "update", "delete"]:
-        # Handle WHERE clause operations
         if where_condition and operation in ["update", "delete"]:
             return execute_sales_operation_with_where(operation, where_condition,
                                                       new_quantity=new_quantity,
@@ -729,28 +723,18 @@ async def sales_crud(
         sales_cur = sales_cnxn.cursor()
 
         if operation == "create":
-            # Handle WHERE clause for conditional creates (if needed)
-            if where_condition:
-                # For create with WHERE, you might want to create multiple records based on condition
-                # This is a more complex scenario - keeping simple for now
-                sales_cnxn.close()
-                return {"sql": None, "result": "❌ WHERE clause not supported for create operation"}
-
             if not customer_id or not product_id:
                 sales_cnxn.close()
                 return {"sql": None, "result": "❌ 'customer_id' and 'product_id' required for create."}
 
-            # Validate customer exists
             if not validate_customer_exists(customer_id):
                 sales_cnxn.close()
                 return {"sql": None, "result": f"❌ Customer with ID {customer_id} not found."}
 
-            # Validate product exists and get price
             if not validate_product_exists(product_id):
                 sales_cnxn.close()
                 return {"sql": None, "result": f"❌ Product with ID {product_id} not found."}
 
-            # Get product price if not provided
             if not unit_price:
                 product_details = get_product_details(product_id)
                 unit_price = product_details["price"]
@@ -759,13 +743,12 @@ async def sales_crud(
                 total_amount = unit_price * quantity
 
             sql_query = """
-                        INSERT INTO sales (customer_id, product_id, quantity, unit_price, total_amount)
-                        VALUES (%s, %s, %s, %s, %s)
-                        """
+                INSERT INTO sales (customer_id, product_id, quantity, unit_price, total_amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """
             sales_cur.execute(sql_query, (customer_id, product_id, quantity, unit_price, total_amount))
             sales_cnxn.commit()
 
-            # Get customer and product names for response
             customer_name = get_customer_name(customer_id)
             product_details = get_product_details(product_id)
 
@@ -778,13 +761,11 @@ async def sales_crud(
                 sales_cnxn.close()
                 return {"sql": None, "result": "❌ 'sale_id' and 'new_quantity' required for update."}
 
-            # Recalculate total amount
             sql_query = """
-                        UPDATE sales
-                        SET quantity     = %s,
-                            total_amount = unit_price * %s
-                        WHERE id = %s
-                        """
+                UPDATE sales
+                SET quantity = %s, total_amount = unit_price * %s
+                WHERE id = %s
+            """
             sales_cur.execute(sql_query, (new_quantity, new_quantity, sale_id))
             sales_cnxn.commit()
             result = f"✅ Sale id={sale_id} updated to quantity {new_quantity}."
@@ -803,12 +784,10 @@ async def sales_crud(
             sales_cnxn.close()
             return {"sql": sql_query, "result": result}
 
-    # For READ operations with column filtering and WHERE clause support - use MySQL Sales table
     elif operation == "read":
         mysql_cnxn = get_mysql_conn()
         mysql_cur = mysql_cnxn.cursor()
 
-        # Define available columns and their mappings
         available_columns = {
             "sale_id": "s.Id",
             "customer_first_name": "c.FirstName",
@@ -822,14 +801,11 @@ async def sales_crud(
             "customer_email": "c.Email"
         }
 
-        # Default columns (excluding sale_id and unit_price as requested)
         default_columns = ["customer_first_name", "customer_last_name", "product_name",
                            "product_description", "quantity", "total_price", "sale_date", "customer_email"]
 
-        # Parse requested columns
         if columns:
             requested_cols = [col.strip() for col in columns.split(",")]
-            # Validate requested columns
             valid_cols = [col for col in requested_cols if col in available_columns]
             if not valid_cols:
                 mysql_cnxn.close()
@@ -838,25 +814,16 @@ async def sales_crud(
         else:
             selected_columns = default_columns
 
-        # Build SELECT clause
-        select_parts = []
-        for col in selected_columns:
-            if col in available_columns:
-                select_parts.append(f"{available_columns[col]} AS {col}")
-
-        # Build WHERE clause
-        where_clause = ""
-        if where_condition:
-            # Simple WHERE condition parsing - you can enhance this for more complex conditions
-            where_clause = f" WHERE {where_condition}"
+        select_parts = [f"{available_columns[col]} AS {col}" for col in selected_columns]
+        where_clause = f" WHERE {where_condition}" if where_condition else ""
 
         sql = f"""
-        SELECT  {', '.join(select_parts)}
-        FROM    Sales          s
-        JOIN    Customers      c ON c.Id = s.customer_id
-        JOIN    ProductsCache  p ON p.id = s.product_id
-        {where_clause}
-        ORDER BY s.sale_date DESC;
+            SELECT {', '.join(select_parts)}
+            FROM Sales s
+            JOIN Customers c ON c.Id = s.customer_id
+            JOIN ProductsCache p ON p.id = s.product_id
+            {where_clause}
+            ORDER BY s.sale_date DESC;
         """
 
         mysql_cur.execute(sql)
@@ -865,7 +832,6 @@ async def sales_crud(
 
         processed_results = []
         for r in rows:
-            # Build result dictionary dynamically based on selected columns
             sale_data = {}
             for i, col in enumerate(selected_columns):
                 if col == "sale_date" and r[i]:
@@ -875,24 +841,20 @@ async def sales_crud(
                 else:
                     sale_data[col] = r[i]
 
-            # Apply formatting based on display_format (simplified for selected columns)
             if display_format == "Data Format Conversion" and "sale_date" in sale_data:
-                sale_data["sale_date"] = sale_data["sale_date"].strftime("%Y-%m-%d %H:%M:%S") if sale_data[
-                    "sale_date"] else "N/A"
+                sale_data["sale_date"] = sale_data["sale_date"].strftime("%Y-%m-%d %H:%M:%S") if sale_data["sale_date"] else "N/A"
             elif display_format == "Decimal Value Formatting":
                 for price_field in ["unit_price", "total_price"]:
                     if price_field in sale_data and isinstance(sale_data[price_field], (int, float)):
                         sale_data[price_field] = f"{sale_data[price_field]:.2f}"
             elif display_format == "String Concatenation":
                 if "customer_first_name" in sale_data and "customer_last_name" in sale_data:
-                    sale_data[
-                        "customer_full_name"] = f"{sale_data['customer_first_name']} {sale_data['customer_last_name']}"
+                    sale_data["customer_full_name"] = f"{sale_data['customer_first_name']} {sale_data['customer_last_name']}"
                 if "product_name" in sale_data and "product_description" in sale_data:
-                    sale_data[
-                        "product_full_description"] = f"{sale_data['product_name']} ({sale_data['product_description'] or 'No description'})"
+                    sale_data["product_full_description"] = f"{sale_data['product_name']} ({sale_data['product_description'] or 'No description'})"
             elif display_format == "Null Value Removal/Handling":
                 if "customer_email" in sale_data and sale_data["customer_email"] is None:
-                    continue  # Skip this record entirely
+                    continue
                 if "product_description" in sale_data:
                     sale_data["product_description"] = sale_data["product_description"] or "N/A"
 
@@ -916,4 +878,3 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 8000))
     mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
-
