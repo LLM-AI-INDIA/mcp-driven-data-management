@@ -544,7 +544,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     }
 
     system_prompt = (
- "You are an intelligent sales agent and database router for CRUD operations. "
+"You are an intelligent sales agent and database router for CRUD operations. "
     "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
 
     "AS A SALES AGENT, YOU SHOULD:\n"
@@ -569,6 +569,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     "  * Sales, transactions, orders, customer purchases, product sales, revenue\n"
     "  * Phrases like 'record a sale', 'customer buys product', 'show sales', 'show sales of Alice and Bob'\n"
     "  * Queries where both customers and products are mentioned but the focus is a transaction\n"
+    "  * Queries that involve excluding or including columns related to customer or product within a sales context\n"
     "- Use `sqlserver_crud` only for:\n"
     "  * Customer-related queries (adding/updating/listing customer records)\n"
     "  * Phrases like 'add customer', 'update email', 'list customers', 'find customers with name John'\n"
@@ -582,6 +583,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     "- 'create order for product X and customer Y' → `sales_crud`\n"
     "- 'show all transactions this month' → `sales_crud`\n"
     "- 'show sales of Alice and Bob' → `sales_crud`\n"
+    "- 'show sales without customer name and product name' → `sales_crud`\n"
     "- 'add customer John Doe' → `sqlserver_crud`\n"
     "- 'show customer list' → `sqlserver_crud`\n"
     "- 'add product iPhone for 1200.99' → `postgresql_crud`\n"
@@ -591,6 +593,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
     "ARGUMENT EXTRACTION:\n"
     "- `sales_crud`: supports `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available. Also supports `columns`, `where_clause`, `limit`\n"
+    "  * When columns include exclusions like `*,-customer_name,-product_name`, this is still a sales query and must route to `sales_crud`\n"
     "- `sqlserver_crud`: supports `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`, `limit`\n"
     "- `postgresql_crud`: supports `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`, `limit`\n\n"
 
@@ -1987,5 +1990,6 @@ with st.expander("🔧 Enhanced Features & Working Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
