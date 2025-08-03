@@ -11,4 +11,5 @@ openai
 fastmcp
 python-dotenv
 asyncio
-langchain
+langchain_core
+langchain_groq
