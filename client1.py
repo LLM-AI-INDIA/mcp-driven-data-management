@@ -354,6 +354,7 @@ with st.sidebar:
     st.markdown(
         """
         <div class="sidebar-logo-row">
+            <img src="https://media.licdn.com/dms/image/v2/D560BAQFIon13R1UG4g/company-logo_200_200/company-logo_200_200/0/1733990910443/llm_at_scale_logo?e=2147483647&v=beta&t=WtAgFOcGQuTS0aEIqZhNMzWraHwL6FU0z5EPyPrty04" title="LLM at Scale AI">
             <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud">
             <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS">
             <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud">
@@ -400,14 +401,14 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            MCP-Driven Data Management Implementation
+           MCP-Driven Data Management With Natural Language
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Agentic Platform: Leveraging MCP and LLMs for Secure CRUD Operations and Instant Analytics on SQL Server and PostgreSQL.
+            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL 
         </span>
         <hr style="
         width: 80%;
@@ -1319,3 +1320,4 @@ with st.expander("🔧 Enhanced Features & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
