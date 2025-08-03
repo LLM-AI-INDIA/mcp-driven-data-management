@@ -466,7 +466,8 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
             'operation', 'customer_id', 'product_id', 'quantity',
             'unit_price', 'total_amount', 'sale_id', 'new_quantity',
             'table_name', 'display_format', 'customer_name',
-            'product_name', 'email', 'total_price'
+            'product_name', 'email', 'total_price', 'columns',
+            'where_condition', 'new_price'  # NEW PARAMETERS ADDED
         }
 
         # Clean args to only include allowed parameters
@@ -556,7 +557,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Parse user query with fully dynamic tool selection based on tool descriptions"""
+    """Parse user query with fully dynamic tool selection and new WHERE/column filtering support"""
 
     if not available_tools:
         return {"error": "No tools available"}
@@ -582,18 +583,56 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         "- 'delete': for removing, deleting, or destroying records\n"
         "- 'describe': for showing table structure, schema, or column information\n\n"
 
+        "NEW FEATURES - COLUMN FILTERING & WHERE CLAUSES:\n"
+        "For sales_crud tool, support these advanced parameters:\n\n"
+
+        "COLUMN FILTERING:\n"
+        "- 'columns': comma-separated list of specific columns to return\n"
+        "- Look for patterns like: 'show only product_name and quantity', 'select customer name and price'\n"
+        "- Available columns: 'sale_id', 'customer_first_name', 'customer_last_name', 'product_name', 'product_description', 'quantity', 'unit_price', 'total_price', 'sale_date', 'customer_email'\n"
+        "- Examples:\n"
+        "  - 'show product names and quantities' → columns: 'product_name,quantity'\n"
+        "  - 'display customer names and prices' → columns: 'customer_first_name,customer_last_name,total_price'\n\n"
+
+        "WHERE CLAUSE SUPPORT:\n"
+        "- 'where_condition': SQL WHERE clause conditions for filtering\n"
+        "- For READ operations: filter displayed results\n"
+        "- For UPDATE/DELETE operations: bulk operations on matching records\n"
+        "- Examples:\n"
+        "  - 'sales where price > 14' → where_condition: 's.unit_price > 14'\n"
+        "  - 'update sales where quantity >= 2' → where_condition: 'quantity >= 2'\n"
+        "  - 'delete sales where customer_id = 1' → where_condition: 'customer_id = 1'\n"
+        "  - 'show sales for Alice' → where_condition: 'c.FirstName = \"Alice\"'\n\n"
+
+        "WHERE CONDITION PATTERNS:\n"
+        "- Price conditions: 'price > X', 'unit_price = X', 'total_price BETWEEN X AND Y'\n"
+        "- Quantity conditions: 'quantity >= X', 'quantity = X'\n"
+        "- Customer conditions: 'customer_id = X', 'c.FirstName = \"NAME\"'\n"
+        "- Product conditions: 'product_id = X', 'p.name = \"PRODUCT\"'\n"
+        "- Date conditions: 'sale_date >= \"YYYY-MM-DD\"'\n\n"
+
+        "BULK OPERATIONS WITH WHERE:\n"
+        "- 'update sales where price > 14 set quantity to 5' → action: 'update', where_condition: 'unit_price > 14', new_quantity: 5\n"
+        "- 'delete sales where quantity = 1' → action: 'delete', where_condition: 'quantity = 1'\n"
+        "- 'update price to 20 where product is Widget' → action: 'update', where_condition: 'p.name = \"Widget\"', new_price: 20\n\n"
+
+        "ENHANCED NAME DETECTION FOR DELETE/UPDATE OPERATIONS:\n"
+        "When user mentions delete/update operations with names, always extract and include 'name' parameter:\n"
+        "Examples:\n"
+        "- 'delete customer Alice' → extract 'name': 'Alice'\n"
+        "- 'delete Alice Johnson' → extract 'name': 'Alice Johnson'\n"
+        "- 'delete Johnson' → extract 'name': 'Johnson'\n"
+        "- 'remove customer Bob' → extract 'name': 'Bob'\n"
+        "- 'delete product Widget' → extract 'name': 'Widget'\n"
+        "- 'update price of Gadget' → extract 'name': 'Gadget'\n"
+        "- 'change price of Tool to 30' → extract 'name': 'Tool' and 'new_price': 30\n\n"
+
         "SALES ETL DISPLAY FORMATTING:\n"
         "For sales_crud tool, when user requests data formatting or conversion, use these EXACT display_format values:\n"
         "- 'Data Format Conversion' - for date formatting and data conversion\n"
         "- 'Decimal Value Formatting' - for price formatting to 2 decimal places\n"
         "- 'String Concatenation' - for combining fields into readable summaries\n"
         "- 'Null Value Removal/Handling' - for cleaning null values\n\n"
-
-        "ETL QUERY PATTERNS:\n"
-        "- 'format data', 'convert data', 'data conversion', 'data format conversion' → display_format: 'Data Format Conversion'\n"
-        "- 'decimal format', 'format prices', 'format decimals', 'decimal value formatting' → display_format: 'Decimal Value Formatting'\n"
-        "- 'concatenate', 'combine fields', 'readable format', 'string concatenation' → display_format: 'String Concatenation'\n"
-        "- 'clean data', 'remove nulls', 'handle nulls', 'null value removal' → display_format: 'Null Value Removal/Handling'\n\n"
 
         "TOOL SELECTION GUIDELINES:\n"
         "- Analyze the user's business intent and match it with the most relevant tool description\n"
@@ -608,21 +647,23 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         "- For sales operations: extract customer_id, product_id, quantity, unit_price\n"
         "- For updates: include new_quantity, sale_id, new_email, new_price\n"
         "- For ETL/formatting: include display_format with exact string match\n"
-        "- Never use parameters like 'format_conversion', 'decimal_formatting' - only use 'display_format'\n\n"
+        "- For column filtering: include 'columns' parameter\n"
+        "- For WHERE clauses: include 'where_condition' parameter\n"
+        "- For delete/update by name: ALWAYS include 'name' parameter when names are mentioned\n\n"
 
         f"AVAILABLE TOOLS:\n{tools_description}\n\n"
 
-        "EXAMPLES:\n"
-        "Query: 'show sales with data format conversion' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
-        "Query: 'format sales prices to 2 decimals' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
-        "Query: 'create readable sales summaries' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
-        "Query: 'clean sales data removing nulls' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
-        "Query: 'list all sales' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {}}\n"
-        "Query: 'show all customers' → {\"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": {}}\n"
-        "Query: 'list products' → {\"tool\": \"postgresql_crud\", \"action\": \"read\", \"args\": {}}\n"
+        "EXAMPLES WITH NEW FEATURES:\n"
+        "Query: 'show sales with only product name and quantity' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{\"columns\": \"product_name,quantity\"}}}}\n"
+        "Query: 'display sales where price > 15' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{\"where_condition\": \"s.unit_price > 15\"}}}}\n"
+        "Query: 'show customer names and prices for expensive sales' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{\"columns\": \"customer_first_name,customer_last_name,total_price\", \"where_condition\": \"s.total_price > 20\"}}}}\n"
+        "Query: 'update sales where price > 14 set quantity to 3' → {{\"tool\": \"sales_crud\", \"action\": \"update\", \"args\": {{\"where_condition\": \"unit_price > 14\", \"new_quantity\": 3}}}}\n"
+        "Query: 'delete sales where quantity = 1' → {{\"tool\": \"sales_crud\", \"action\": \"delete\", \"args\": {{\"where_condition\": \"quantity = 1\"}}}}\n"
+        "Query: 'delete customer Alice' → {{\"tool\": \"sqlserver_crud\", \"action\": \"delete\", \"args\": {{\"name\": \"Alice\"}}}}\n"
+        "Query: 'show all sales' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{}}}}\n"
     )
 
-    user_prompt = f"User query: \"{query}\"\n\nAnalyze the query and respond with the exact JSON format. Use only the specified parameter names."
+    user_prompt = f"User query: \"{query}\"\n\nAnalyze the query and respond with the exact JSON format. Extract column filtering, WHERE conditions, and names for operations."
 
     try:
         messages = [
@@ -715,9 +756,34 @@ def normalize_args(args):
     return args
 
 
-def extract_name(text):
-    match = re.search(r'customer\s+(\w+)', text, re.IGNORECASE)
-    return match.group(1) if match else None
+def extract_name_from_query(text: str) -> str:
+    """Enhanced name extraction that handles various patterns"""
+    # Patterns for customer operations
+    customer_patterns = [
+        r'delete\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'remove\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'update\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'delete\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'remove\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)'
+    ]
+
+    # Patterns for product operations
+    product_patterns = [
+        r'delete\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'remove\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'update\s+(?:price\s+of\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'change\s+price\s+of\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'(?:price\s+of\s+)([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(?:to|=)'
+    ]
+
+    all_patterns = customer_patterns + product_patterns
+
+    for pattern in all_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+
+    return None
 
 
 def extract_email(text):
@@ -726,8 +792,20 @@ def extract_email(text):
 
 
 def extract_price(text):
-    match = re.search(r'(\d+(?:\.\d+)?)', text)
-    return float(match.group(0)) if match else None
+    # Look for price patterns like "to 25", "= 30.50", "$15.99"
+    price_patterns = [
+        r'to\s+\$?(\d+(?:\.\d+)?)',
+        r'=\s+\$?(\d+(?:\.\d+)?)',
+        r'\$(\d+(?:\.\d+)?)',
+        r'(\d+(?:\.\d+)?)\s*dollars?'
+    ]
+
+    for pattern in price_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+
+    return None
 
 
 def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str) -> str:
@@ -921,8 +999,19 @@ if application == "MCP Application":
                 st.markdown("#### Here's the current table:")
                 df = pd.DataFrame(content["result"])
                 st.table(df)
-                # Check if this is ETL formatted data by looking for specific formatting
+
+                # Enhanced descriptions for new features
                 if tool == "sales_crud" and len(df.columns) > 0:
+                    # Check for column filtering
+                    if len(df.columns) < 7:  # If fewer columns than default, column filtering was likely used
+                        st.info(
+                            f"📊 Column filtering applied - Showing {len(df.columns)} selected columns: {', '.join(df.columns)}")
+
+                    # Check for WHERE clause filtering
+                    if "where_condition" in msg.get("request", {}).get("args", {}):
+                        where_cond = msg["request"]["args"]["where_condition"]
+                        st.info(f"🔍 Data filtered with WHERE clause: {where_cond}")
+
                     # Check for different ETL formats based on column names
                     if "sale_summary" in df.columns:
                         st.info("📊 Data formatted with String Concatenation - Combined fields for readability")
@@ -937,14 +1026,13 @@ if application == "MCP Application":
                         st.markdown(f"The table contains {len(df)} sales records with cross-database information.")
                 elif tool == "sqlserver_crud":
                     st.markdown(
-                        f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps."
-                    )
+                        f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps.")
                 elif tool == "postgresql_crud":
                     st.markdown(
-                        f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions."
-                    )
+                        f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions.")
                 else:
                     st.markdown(f"The table contains {len(df)} records.")
+
             elif action == "describe" and isinstance(content['result'], list):
                 st.markdown("#### Table Schema: ")
                 df = pd.DataFrame(content['result'])
@@ -1032,100 +1120,87 @@ if application == "MCP Application":
             args = normalize_args(args)
             p["args"] = args
 
+            # ========== ENHANCED NAME-BASED RESOLUTION ==========
+
+            # For SQL Server (customers) operations
+            if tool == "sqlserver_crud":
+                if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
+                    # First, try to find the customer by name
+                    name_to_find = args["name"]
+                    try:
+                        # Search for customer by name
+                        read_result = call_mcp_tool(tool, "read", {})
+                        if isinstance(read_result, dict) and "result" in read_result:
+                            customers = read_result["result"]
+                            # Try exact match first
+                            exact_matches = [c for c in customers if c.get("Name", "").lower() == name_to_find.lower()]
+                            if exact_matches:
+                                args["customer_id"] = exact_matches[0]["Id"]
+                            else:
+                                # Try partial matches (first name or last name)
+                                partial_matches = [c for c in customers if
+                                                   name_to_find.lower() in c.get("Name", "").lower() or
+                                                   name_to_find.lower() in c.get("FirstName", "").lower() or
+                                                   name_to_find.lower() in c.get("LastName", "").lower()]
+                                if partial_matches:
+                                    args["customer_id"] = partial_matches[0]["Id"]
+                                else:
+                                    raise Exception(f"❌ Customer '{name_to_find}' not found")
+                    except Exception as e:
+                        if "not found" in str(e):
+                            raise e
+                        else:
+                            raise Exception(f"❌ Error finding customer '{name_to_find}': {str(e)}")
+
+                # Extract new email for updates
+                if action == "update" and "new_email" not in args:
+                    possible_email = extract_email(user_query)
+                    if possible_email:
+                        args["new_email"] = possible_email
+
+            # For PostgreSQL (products) operations
+            elif tool == "postgresql_crud":
+                if action in ["update", "delete"] and "name" in args and "product_id" not in args:
+                    # First, try to find the product by name
+                    name_to_find = args["name"]
+                    try:
+                        # Search for product by name
+                        read_result = call_mcp_tool(tool, "read", {})
+                        if isinstance(read_result, dict) and "result" in read_result:
+                            products = read_result["result"]
+                            # Try exact match first
+                            exact_matches = [p for p in products if p.get("name", "").lower() == name_to_find.lower()]
+                            if exact_matches:
+                                args["product_id"] = exact_matches[0]["id"]
+                            else:
+                                # Try partial matches
+                                partial_matches = [p for p in products if
+                                                   name_to_find.lower() in p.get("name", "").lower()]
+                                if partial_matches:
+                                    args["product_id"] = partial_matches[0]["id"]
+                                else:
+                                    raise Exception(f"❌ Product '{name_to_find}' not found")
+                    except Exception as e:
+                        if "not found" in str(e):
+                            raise e
+                        else:
+                            raise Exception(f"❌ Error finding product '{name_to_find}': {str(e)}")
+
+                # Extract new price for updates
+                if action == "update" and "new_price" not in args:
+                    possible_price = extract_price(user_query)
+                    if possible_price is not None:
+                        args['new_price'] = possible_price
+
+            # Update the parsed args
+            p["args"] = args
+
+            # Handle describe operations
             if action == "describe" and "table_name" in args:
                 if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
                     args["table_name"] = "Customers"
                 if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
                     args["table_name"] = "products"
-
-            # SQL Server: update by name
-            if tool == "sqlserver_crud" and action == "update":
-                if "name" not in args:
-                    extracted_name = extract_name(user_query)
-                    if extracted_name:
-                        args['name'] = extracted_name
-                        p['args'] = args
-                if "customer_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("Name", "").lower() == args["name"].lower()]
-                        if matches:
-                            args["customer_id"] = matches[0]["Id"]
-                            p["args"] = args
-                if "new_email" not in args:
-                    possible_email = extract_email(user_query)
-                    if possible_email:
-                        args["new_email"] = possible_email
-                        p["args"] = args
-
-            if tool == "sqlserver_crud" and action == "delete":
-                if "customer_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("Name", "").lower() == args["name"].lower()]
-                        if matches:
-                            args["customer_id"] = matches[0]["Id"]
-                            p["args"] = args
-                if "customer_id" not in args:
-                    extracted_name = extract_name(user_query)
-                    if extracted_name:
-                        read_args = {"name": extracted_name}
-                        read_result = call_mcp_tool(tool, "read", read_args)
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            matches = [r for r in read_result["result"] if
-                                       r.get("Name", "").lower() == extracted_name.lower()]
-                            if matches:
-                                args["customer_id"] = matches[0]["Id"]
-                                p["args"] = args
-
-            # PostgreSQL: update by name
-            if tool == "postgresql_crud" and action == "update":
-                if "product_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("name", "").lower() == args["name"].lower()]
-                        if matches:
-                            args["product_id"] = matches[0]["id"]
-                            p["args"] = args
-                if "name" not in args:
-                    m = re.search(r'price of ([a-zA-Z0-9_ ]+?) (?:to|=)', user_query, re.I)
-                    if m:
-                        args["name"] = m.group(1).strip()
-                        p["args"] = args
-                if "new_price" not in args:
-                    possible_price = extract_price(user_query)
-                    if possible_price is not None:
-                        args['new_price'] = possible_price
-                        p["args"] = args
-
-            if tool == "postgresql_crud" and action == "delete":
-                if "product_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("name", "").lower() == args["name"].lower()]
-                        if matches:
-                            args["product_id"] = matches[0]["id"]
-                            p["args"] = args
-                if "product_id" not in args:
-                    match = re.search(r'product\s+(\w+)', user_query, re.IGNORECASE)
-                    if match:
-                        product_name = match.group(1)
-                        read_args = {"name": product_name}
-                        read_result = call_mcp_tool(tool, "read", read_args)
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            matches = [r for r in read_result["result"] if
-                                       r.get("name", "").lower() == product_name.lower()]
-                            if matches:
-                                args["product_id"] = matches[0]["id"]
-                                p["args"] = args
 
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
         except Exception as e:
@@ -1174,11 +1249,35 @@ if application == "MCP Application":
     """)
 
 # ========== ETL EXAMPLES HELP SECTION ==========
-with st.expander("🔧 ETL Functions & Examples"):
+with st.expander("🔧 Enhanced Features & Examples"):
     st.markdown("""
-    ### ETL Display Formatting Functions
+    ### NEW: Column Filtering & WHERE Clause Support
 
-    Your MCP server supports 4 ETL (Extract, Transform, Load) functions for data formatting:
+    #### Column Filtering
+    Select specific columns to display in your results:
+    - **"show only product name and quantity"** - Display selected columns only
+    - **"display customer names and prices"** - Filter to specific data
+    - **Available columns**: sale_id, customer_first_name, customer_last_name, product_name, product_description, quantity, unit_price, total_price, sale_date, customer_email
+
+    #### WHERE Clause Filtering
+    Filter data with SQL-like conditions:
+    - **"sales where price > 14"** - Show sales with unit price above $14
+    - **"show sales where quantity >= 2"** - Multi-item purchases only
+    - **"display sales for Alice"** - Filter by customer name
+    - **"sales where customer_id = 1"** - Filter by customer ID
+
+    #### Bulk Operations with WHERE
+    Perform operations on multiple records:
+    - **"update sales where price > 14 set quantity to 5"** - Bulk update quantities
+    - **"delete sales where quantity = 1"** - Remove single-item purchases
+    - **"update price to 20 where product is Widget"** - Update specific product prices
+
+    #### Combined Features
+    Use both column filtering and WHERE clauses together:
+    - **"show customer names and prices where total > 20"** - High-value sales with specific columns
+    - **"display product and quantity where customer is Alice"** - Customer-specific filtered data
+
+    ### ETL Display Formatting Functions
 
     #### 1. Data Format Conversion
     - **Query Examples:** 
@@ -1211,4 +1310,12 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"list all sales"** - Shows regular unformatted sales data
     - **"show customers"** - Shows customer data
     - **"list products"** - Shows product inventory
+
+    ### Smart Name-Based Operations
+    - **"delete customer Alice"** - Finds and deletes Alice by name
+    - **"delete Alice Johnson"** - Finds customer by full name
+    - **"remove Johnson"** - Finds customer by last name
+    - **"delete product Widget"** - Finds and deletes Widget by name
+    - **"update price of Gadget to 25"** - Updates Gadget price to $25
+    - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
