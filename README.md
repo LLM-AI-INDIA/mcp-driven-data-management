@@ -13,8 +13,8 @@ Table of Contents
 
    - Prerequisites
    - Environment Variables (.env)
-   - Database Configuration (AWS RDS)
-    - Running the Server
+   - Database Configuration
+    - Running the Server (AWS EC2)
    - Running the Client
 5. Usage
 6. Troubleshooting
@@ -138,26 +138,14 @@ PG_PASSWORD=your_postgresql_password
 
 **Database Configuration (AWS RDS)**
 
-1. Create MySQL RDS Instance:
+1. Create MySQL Instance on Aiven Console:
        - Engine: MySQL
 
-       - Ensure "Public accessibility" is set to Yes.
+       - Important: Your Server_Tools1.py will create the Customers, Sales tables within the database specified by MYSQL_DB.
 
-       - Configure a VPC Security Group that allows Inbound TCP traffic on port 3306 from your application server's IP address (e.g., EC2 instance IP) and your local development IP address.
-
-       - Note down the Endpoint, Port, Master Username, and Master Password.
-
-       - Important: Your Server_Tools1.py will create the Customers, Sales, and ProductsCache tables within the database specified by MYSQL_DB.
-
-2. Create PostgreSQL RDS Instance:
+2. Create PostgreSQL on Supabase:
 
         - Engine: PostgreSQL
-
-        - Ensure "Public accessibility" is set to Yes.
-
-        - Configure a VPC Security Group that allows Inbound TCP traffic on port 5432 from your application server's IP address and your local development IP address.
-
-        - Note down the Endpoint, Port, Master Username, and Master Password.
 
         - Important: Your Server_Tools1.py will create the products table within the database specified by PG_DB.
 
