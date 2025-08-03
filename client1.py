@@ -384,9 +384,7 @@ if logo_base64:
         """,
         unsafe_allow_html=True
     )
-col1, col2, col3 = st.columns([1, 4, 1])
-with col2:
-    st.image(logo_path, width=180)
+
     
 st.markdown(
     """
@@ -1322,6 +1320,7 @@ with st.expander("🔧 Enhanced Features & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
