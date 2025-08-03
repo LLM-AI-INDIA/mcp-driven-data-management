@@ -10,14 +10,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def must_get(key: str) -> str:
+    val = os.getenv(key)
+    if not val:
+        raise RuntimeError(f"Missing required env var {key}")
+    return val
+
+
 # ————————————————
 # 1. MySQL Configuration
 # ————————————————
-MYSQL_HOST = os.getenv("MYSQL_HOST")
-MYSQL_PORT = int(os.getenv("MYSQL_PORT"))
-MYSQL_USER = os.getenv("MYSQL_USER")
-MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD")
-MYSQL_DB = os.getenv("MYSQL_DB")
+MYSQL_HOST = must_get("MYSQL_HOST")
+MYSQL_PORT = int(must_get("MYSQL_PORT"))
+MYSQL_USER = must_get("MYSQL_USER")
+MYSQL_PASSWORD = must_get("MYSQL_PASSWORD")
+MYSQL_DB = must_get("MYSQL_DB")
 
 
 def get_mysql_conn(db: str | None = MYSQL_DB):
@@ -36,13 +44,6 @@ def get_mysql_conn(db: str | None = MYSQL_DB):
 # ————————————————
 # 2. PostgreSQL Configuration (Products)
 # ————————————————
-def must_get(key: str) -> str:
-    val = os.getenv(key)
-    if not val:
-        raise RuntimeError(f"Missing required env var {key}")
-    return val
-
-
 PG_HOST = must_get("PG_HOST")
 PG_PORT = int(must_get("PG_PORT"))
 PG_DB = os.getenv("PG_DB", "postgres")  # db name can default
@@ -102,8 +103,18 @@ def seed_databases():
     sql_cnx = get_mysql_conn()
     sql_cur = sql_cnx.cursor()
 
-    # Create Customers table with FirstName and LastName
+    # Disable foreign key checks temporarily
+    sql_cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
+
+    # Drop tables in reverse dependency order (Sales first, then referenced tables)
+    sql_cur.execute("DROP TABLE IF EXISTS Sales;")
+    sql_cur.execute("DROP TABLE IF EXISTS ProductsCache;")
     sql_cur.execute("DROP TABLE IF EXISTS Customers;")
+
+    # Re-enable foreign key checks
+    sql_cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
+
+    # Create Customers table with FirstName and LastName
     sql_cur.execute("""
                     CREATE TABLE Customers
                     (
@@ -125,7 +136,6 @@ def seed_databases():
     )
 
     # Create ProductsCache table (copy of PostgreSQL products for easier joins)
-    sql_cur.execute("DROP TABLE IF EXISTS ProductsCache;")
     sql_cur.execute("""
                     CREATE TABLE ProductsCache
                     (
@@ -144,8 +154,7 @@ def seed_databases():
          (3, "Tool", 24.99, None)]  # Tool has no description for null handling demo
     )
 
-    # Create Sales table in MySQL
-    sql_cur.execute("DROP TABLE IF EXISTS Sales;")
+    # Create Sales table in MySQL with foreign key constraints
     sql_cur.execute("""
                     CREATE TABLE Sales
                     (
@@ -156,8 +165,8 @@ def seed_databases():
                         unit_price   DECIMAL(10, 4) NOT NULL,
                         total_price  DECIMAL(10, 4) NOT NULL,
                         sale_date    TIMESTAMP      DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (customer_id) REFERENCES Customers(Id),
-                        FOREIGN KEY (product_id) REFERENCES ProductsCache(id)
+                        FOREIGN KEY (customer_id) REFERENCES Customers(Id) ON DELETE CASCADE,
+                        FOREIGN KEY (product_id) REFERENCES ProductsCache(id) ON DELETE CASCADE
                     );
                     """)
 
@@ -225,7 +234,7 @@ def seed_databases():
 
 
 # ————————————————
-# 6. Helper Functions for Cross-Database Queries
+# 6. Helper Functions for Cross-Database Queries and Name Resolution
 # ————————————————
 def get_customer_name(customer_id: int) -> str:
     """Fetch customer name from MySQL database"""
@@ -282,8 +291,137 @@ def validate_product_exists(product_id: int) -> bool:
         return False
 
 
+def find_customer_by_name(name: str) -> dict:
+    """Find customer by name (supports partial matching)"""
+    try:
+        mysql_cnxn = get_mysql_conn()
+        mysql_cur = mysql_cnxn.cursor()
+
+        # Try exact match first
+        mysql_cur.execute("SELECT Id, Name FROM Customers WHERE Name = %s", (name,))
+        result = mysql_cur.fetchone()
+
+        if result:
+            mysql_cnxn.close()
+            return {"id": result[0], "name": result[1], "found": True}
+
+        # Try case-insensitive exact match
+        mysql_cur.execute("SELECT Id, Name FROM Customers WHERE LOWER(Name) = LOWER(%s)", (name,))
+        result = mysql_cur.fetchone()
+
+        if result:
+            mysql_cnxn.close()
+            return {"id": result[0], "name": result[1], "found": True}
+
+        # Try partial match on first name, last name, or full name
+        mysql_cur.execute("""
+            SELECT Id, Name FROM Customers 
+            WHERE LOWER(FirstName) = LOWER(%s) 
+               OR LOWER(LastName) = LOWER(%s)
+               OR LOWER(Name) LIKE LOWER(%s)
+        """, (name, name, f"%{name}%"))
+        result = mysql_cur.fetchone()
+
+        if result:
+            mysql_cnxn.close()
+            return {"id": result[0], "name": result[1], "found": True}
+
+        mysql_cnxn.close()
+        return {"found": False, "error": f"Customer '{name}' not found"}
+
+    except Exception as e:
+        return {"found": False, "error": f"Database error: {str(e)}"}
+
+
+def find_product_by_name(name: str) -> dict:
+    """Find product by name (supports partial matching)"""
+    try:
+        pg_cnxn = get_pg_conn()
+        pg_cur = pg_cnxn.cursor()
+
+        # Try exact match first
+        pg_cur.execute("SELECT id, name FROM products WHERE name = %s", (name,))
+        result = pg_cur.fetchone()
+
+        if result:
+            pg_cnxn.close()
+            return {"id": result[0], "name": result[1], "found": True}
+
+        # Try case-insensitive exact match
+        pg_cur.execute("SELECT id, name FROM products WHERE LOWER(name) = LOWER(%s)", (name,))
+        result = pg_cur.fetchone()
+
+        if result:
+            pg_cnxn.close()
+            return {"id": result[0], "name": result[1], "found": True}
+
+        # Try partial match
+        pg_cur.execute("SELECT id, name FROM products WHERE LOWER(name) LIKE LOWER(%s)", (f"%{name}%",))
+        result = pg_cur.fetchone()
+
+        if result:
+            pg_cnxn.close()
+            return {"id": result[0], "name": result[1], "found": True}
+
+        pg_cnxn.close()
+        return {"found": False, "error": f"Product '{name}' not found"}
+
+    except Exception as e:
+        return {"found": False, "error": f"Database error: {str(e)}"}
+
+
+def execute_sales_operation_with_where(operation: str, where_condition: str, **kwargs):
+    """Execute sales operations with WHERE clause support"""
+    sales_cnxn = get_pg_sales_conn()
+    sales_cur = sales_cnxn.cursor()
+
+    try:
+        if operation == "delete" and where_condition:
+            sql_query = f"DELETE FROM sales WHERE {where_condition}"
+            sales_cur.execute(sql_query)
+            affected_rows = sales_cur.rowcount
+            sales_cnxn.commit()
+            result = f"✅ Deleted {affected_rows} sales records matching condition: {where_condition}"
+
+        elif operation == "update" and where_condition:
+            # Build UPDATE SET clause based on provided parameters
+            set_clauses = []
+            params = []
+
+            if kwargs.get('new_quantity') is not None:
+                set_clauses.append("quantity = %s")
+                set_clauses.append("total_amount = unit_price * %s")
+                params.extend([kwargs['new_quantity'], kwargs['new_quantity']])
+
+            if kwargs.get('new_price') is not None:
+                set_clauses.append("unit_price = %s")
+                set_clauses.append("total_amount = %s * quantity")
+                params.extend([kwargs['new_price'], kwargs['new_price']])
+
+            if not set_clauses:
+                sales_cnxn.close()
+                return {"sql": None, "result": "❌ No update parameters provided (new_quantity or new_price required)"}
+
+            sql_query = f"UPDATE sales SET {', '.join(set_clauses)} WHERE {where_condition}"
+            sales_cur.execute(sql_query, params)
+            affected_rows = sales_cur.rowcount
+            sales_cnxn.commit()
+            result = f"✅ Updated {affected_rows} sales records matching condition: {where_condition}"
+
+        else:
+            sales_cnxn.close()
+            return {"sql": None, "result": f"❌ WHERE clause not supported for {operation} or missing condition"}
+
+        sales_cnxn.close()
+        return {"sql": sql_query, "result": result}
+
+    except Exception as e:
+        sales_cnxn.close()
+        return {"sql": None, "result": f"❌ Error executing {operation} with WHERE clause: {str(e)}"}
+
+
 # ————————————————
-# 7. MySQL CRUD Tool (Customers)
+# 7. Enhanced MySQL CRUD Tool (Customers) with Smart Name Resolution
 # ————————————————
 @mcp.tool()
 async def sqlserver_crud(
@@ -300,6 +438,7 @@ async def sqlserver_crud(
 
     if operation == "create":
         if not name or not email:
+            cnxn.close()
             return {"sql": None, "result": "❌ 'name' and 'email' required for create."}
 
         # Split name into first and last name (simple split)
@@ -310,15 +449,31 @@ async def sqlserver_crud(
         sql_query = "INSERT INTO Customers (FirstName, LastName, Name, Email) VALUES (%s, %s, %s, %s)"
         cur.execute(sql_query, (first_name, last_name, name, email))
         cnxn.commit()
+        cnxn.close()
         return {"sql": sql_query, "result": f"✅ Customer '{name}' added."}
 
     elif operation == "read":
-        sql_query = """
-                    SELECT Id, FirstName, LastName, Name, Email, CreatedAt
-                    FROM Customers
-                    ORDER BY Id ASC
-                    """
-        cur.execute(sql_query)
+        # Handle filtering by name if provided
+        if name:
+            sql_query = """
+                        SELECT Id, FirstName, LastName, Name, Email, CreatedAt
+                        FROM Customers
+                        WHERE LOWER(Name) LIKE LOWER(%s) 
+                           OR LOWER(FirstName) LIKE LOWER(%s)
+                           OR LOWER(LastName) LIKE LOWER(%s)
+                        ORDER BY Id ASC
+                        LIMIT %s
+                        """
+            cur.execute(sql_query, (f"%{name}%", f"%{name}%", f"%{name}%", limit))
+        else:
+            sql_query = """
+                        SELECT Id, FirstName, LastName, Name, Email, CreatedAt
+                        FROM Customers
+                        ORDER BY Id ASC
+                        LIMIT %s
+                        """
+            cur.execute(sql_query, (limit,))
+
         rows = cur.fetchall()
         result = [
             {
@@ -331,32 +486,84 @@ async def sqlserver_crud(
             }
             for r in rows
         ]
+        cnxn.close()
         return {"sql": sql_query, "result": result}
 
     elif operation == "update":
+        # Enhanced update: resolve customer_id from name if not provided
+        if not customer_id and name:
+            customer_info = find_customer_by_name(name)
+            if not customer_info["found"]:
+                cnxn.close()
+                return {"sql": None, "result": f"❌ {customer_info['error']}"}
+            customer_id = customer_info["id"]
+
         if not customer_id or not new_email:
-            return {"sql": None, "result": "❌ 'customer_id' and 'new_email' required for update."}
+            cnxn.close()
+            return {"sql": None, "result": "❌ 'customer_id' (or 'name') and 'new_email' required for update."}
 
         sql_query = "UPDATE Customers SET Email = %s WHERE Id = %s"
         cur.execute(sql_query, (new_email, customer_id))
         cnxn.commit()
-        return {"sql": sql_query, "result": f"✅ Customer id={customer_id} updated."}
+
+        # Get updated customer name for response
+        cur.execute("SELECT Name FROM Customers WHERE Id = %s", (customer_id,))
+        customer_name = cur.fetchone()
+        customer_name = customer_name[0] if customer_name else f"Customer {customer_id}"
+
+        cnxn.close()
+        return {"sql": sql_query, "result": f"✅ Customer '{customer_name}' email updated to '{new_email}'."}
 
     elif operation == "delete":
-        if not customer_id:
-            return {"sql": None, "result": "❌ 'customer_id' required for delete."}
+        # Enhanced delete: resolve customer_id from name if not provided
+        if not customer_id and name:
+            customer_info = find_customer_by_name(name)
+            if not customer_info["found"]:
+                cnxn.close()
+                return {"sql": None, "result": f"❌ {customer_info['error']}"}
+            customer_id = customer_info["id"]
+            customer_name = customer_info["name"]
+        elif customer_id:
+            # Get customer name for response
+            cur.execute("SELECT Name FROM Customers WHERE Id = %s", (customer_id,))
+            result = cur.fetchone()
+            customer_name = result[0] if result else f"Customer {customer_id}"
+        else:
+            cnxn.close()
+            return {"sql": None, "result": "❌ 'customer_id' or 'name' required for delete."}
 
         sql_query = "DELETE FROM Customers WHERE Id = %s"
         cur.execute(sql_query, (customer_id,))
         cnxn.commit()
-        return {"sql": sql_query, "result": f"✅ Customer id={customer_id} deleted."}
+        cnxn.close()
+        return {"sql": sql_query, "result": f"✅ Customer '{customer_name}' deleted."}
+
+    elif operation == "describe":
+        table = table_name or "Customers"
+        sql_query = f"DESCRIBE {table}"
+        cur.execute(sql_query)
+        rows = cur.fetchall()
+        result = [
+            {
+                "Field": r[0],
+                "Type": r[1],
+                "Null": r[2],
+                "Key": r[3],
+                "Default": r[4],
+                "Extra": r[5]
+            }
+            for r in rows
+        ]
+        cnxn.close()
+        return {"sql": sql_query, "result": result}
 
     else:
+        cnxn.close()
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
 
 # ————————————————
-# 8. PostgreSQL CRUD Tool (Products)
+# 8. Enhanced PostgreSQL CRUD Tool (Products) with Smart Name Resolution
 # ————————————————
 @mcp.tool()
 async def postgresql_crud(
@@ -379,17 +586,30 @@ async def postgresql_crud(
         sql_query = "INSERT INTO products (name, price, description) VALUES (%s, %s, %s)"
         cur.execute(sql_query, (name, price, description))
         cnxn.commit()
-        result = f"✅ Product '{name}' added."
+        result = f"✅ Product '{name}' added with price ${price:.2f}."
         cnxn.close()
         return {"sql": sql_query, "result": result}
 
     elif operation == "read":
-        sql_query = (
-            "SELECT id, name, price, description "
-            "FROM products "
-            "ORDER BY id ASC"
-        )
-        cur.execute(sql_query)
+        # Handle filtering by name if provided
+        if name:
+            sql_query = """
+                        SELECT id, name, price, description
+                        FROM products
+                        WHERE LOWER(name) LIKE LOWER(%s)
+                        ORDER BY id ASC
+                        LIMIT %s
+                        """
+            cur.execute(sql_query, (f"%{name}%", limit))
+        else:
+            sql_query = """
+                        SELECT id, name, price, description
+                        FROM products
+                        ORDER BY id ASC
+                        LIMIT %s
+                        """
+            cur.execute(sql_query, (limit,))
+
         rows = cur.fetchall()
         result = [
             {"id": r[0], "name": r[1], "price": float(r[2]), "description": r[3] or ""}
@@ -399,30 +619,75 @@ async def postgresql_crud(
         return {"sql": sql_query, "result": result}
 
     elif operation == "update":
+        # Enhanced update: resolve product_id from name if not provided
+        if not product_id and name:
+            product_info = find_product_by_name(name)
+            if not product_info["found"]:
+                cnxn.close()
+                return {"sql": None, "result": f"❌ {product_info['error']}"}
+            product_id = product_info["id"]
+
         if not product_id or new_price is None:
             cnxn.close()
-            return {"sql": None, "result": "❌ 'product_id' and 'new_price' required for update."}
+            return {"sql": None, "result": "❌ 'product_id' (or 'name') and 'new_price' required for update."}
+
         sql_query = "UPDATE products SET price = %s WHERE id = %s"
         cur.execute(sql_query, (new_price, product_id))
         cnxn.commit()
-        result = f"✅ Product id={product_id} updated."
+
+        # Get updated product name for response
+        cur.execute("SELECT name FROM products WHERE id = %s", (product_id,))
+        product_name = cur.fetchone()
+        product_name = product_name[0] if product_name else f"Product {product_id}"
+
         cnxn.close()
-        return {"sql": sql_query, "result": result}
+        return {"sql": sql_query, "result": f"✅ Product '{product_name}' price updated to ${new_price:.2f}."}
 
     elif operation == "delete":
-        if not product_id and not name:
-            return {"sql": None, "result": "❌ Provide 'product_id' **or** 'name' for delete."}
-
-        if product_id:
-            sql_query = "DELETE FROM products WHERE id = %s"
-            params = (product_id,)
+        # Enhanced delete: resolve product_id from name if not provided
+        if not product_id and name:
+            product_info = find_product_by_name(name)
+            if not product_info["found"]:
+                cnxn.close()
+                return {"sql": None, "result": f"❌ {product_info['error']}"}
+            product_id = product_info["id"]
+            product_name = product_info["name"]
+        elif product_id:
+            # Get product name for response
+            cur.execute("SELECT name FROM products WHERE id = %s", (product_id,))
+            result = cur.fetchone()
+            product_name = result[0] if result else f"Product {product_id}"
         else:
-            sql_query = "DELETE FROM products WHERE name = %s"
-            params = (name,)
+            cnxn.close()
+            return {"sql": None, "result": "❌ 'product_id' or 'name' required for delete."}
 
-        cur.execute(sql_query, params)
+        sql_query = "DELETE FROM products WHERE id = %s"
+        cur.execute(sql_query, (product_id,))
         cnxn.commit()
-        return {"sql": sql_query, "result": f"✅ Deleted product."}
+        cnxn.close()
+        return {"sql": sql_query, "result": f"✅ Product '{product_name}' deleted."}
+
+    elif operation == "describe":
+        table = table_name or "products"
+        sql_query = f"""
+                    SELECT column_name, data_type, is_nullable, column_default
+                    FROM information_schema.columns
+                    WHERE table_name = %s
+                    ORDER BY ordinal_position
+                    """
+        cur.execute(sql_query, (table,))
+        rows = cur.fetchall()
+        result = [
+            {
+                "Column": r[0],
+                "Type": r[1],
+                "Nullable": r[2],
+                "Default": r[3]
+            }
+            for r in rows
+        ]
+        cnxn.close()
+        return {"sql": sql_query, "result": result}
 
     else:
         cnxn.close()
@@ -430,7 +695,7 @@ async def postgresql_crud(
 
 
 # ————————————————
-# 9. Sales CRUD Tool with Display Formatting Features
+# 9. Enhanced Sales CRUD Tool with Column Filtering and WHERE Clause Support
 # ————————————————
 @mcp.tool()
 async def sales_crud(
@@ -443,18 +708,34 @@ async def sales_crud(
         sale_id: int = None,
         new_quantity: int = None,
         table_name: str = None,
-        display_format: str = None,  # NEW: Display formatting parameter
+        display_format: str = None,
         customer_name: str = None,
         product_name: str = None,
         email: str = None,
-        total_price: float = None
+        total_price: float = None,
+        columns: str = None,  # NEW: Comma-separated list of columns to return
+        where_condition: str = None,  # NEW: WHERE clause for operations
+        new_price: float = None  # NEW: For price updates
 ) -> Any:
     # For PostgreSQL sales operations (create, update, delete)
     if operation in ["create", "update", "delete"]:
+        # Handle WHERE clause operations
+        if where_condition and operation in ["update", "delete"]:
+            return execute_sales_operation_with_where(operation, where_condition,
+                                                      new_quantity=new_quantity,
+                                                      new_price=new_price)
+
         sales_cnxn = get_pg_sales_conn()
         sales_cur = sales_cnxn.cursor()
 
         if operation == "create":
+            # Handle WHERE clause for conditional creates (if needed)
+            if where_condition:
+                # For create with WHERE, you might want to create multiple records based on condition
+                # This is a more complex scenario - keeping simple for now
+                sales_cnxn.close()
+                return {"sql": None, "result": "❌ WHERE clause not supported for create operation"}
+
             if not customer_id or not product_id:
                 sales_cnxn.close()
                 return {"sql": None, "result": "❌ 'customer_id' and 'product_id' required for create."}
@@ -522,25 +803,59 @@ async def sales_crud(
             sales_cnxn.close()
             return {"sql": sql_query, "result": result}
 
-    # For READ operations with formatting - use MySQL Sales table
+    # For READ operations with column filtering and WHERE clause support - use MySQL Sales table
     elif operation == "read":
         mysql_cnxn = get_mysql_conn()
         mysql_cur = mysql_cnxn.cursor()
 
-        sql = """
-        SELECT  s.Id,
-                c.FirstName,
-                c.LastName,
-                p.name      AS product_name,
-                p.description AS product_description,
-                s.quantity,
-                s.unit_price,
-                s.total_price,
-                s.sale_date,
-                c.Email AS customer_email
+        # Define available columns and their mappings
+        available_columns = {
+            "sale_id": "s.Id",
+            "customer_first_name": "c.FirstName",
+            "customer_last_name": "c.LastName",
+            "product_name": "p.name",
+            "product_description": "p.description",
+            "quantity": "s.quantity",
+            "unit_price": "s.unit_price",
+            "total_price": "s.total_price",
+            "sale_date": "s.sale_date",
+            "customer_email": "c.Email"
+        }
+
+        # Default columns (excluding sale_id and unit_price as requested)
+        default_columns = ["customer_first_name", "customer_last_name", "product_name",
+                           "product_description", "quantity", "total_price", "sale_date", "customer_email"]
+
+        # Parse requested columns
+        if columns:
+            requested_cols = [col.strip() for col in columns.split(",")]
+            # Validate requested columns
+            valid_cols = [col for col in requested_cols if col in available_columns]
+            if not valid_cols:
+                mysql_cnxn.close()
+                return {"sql": None, "result": f"❌ Invalid columns. Available: {', '.join(available_columns.keys())}"}
+            selected_columns = valid_cols
+        else:
+            selected_columns = default_columns
+
+        # Build SELECT clause
+        select_parts = []
+        for col in selected_columns:
+            if col in available_columns:
+                select_parts.append(f"{available_columns[col]} AS {col}")
+
+        # Build WHERE clause
+        where_clause = ""
+        if where_condition:
+            # Simple WHERE condition parsing - you can enhance this for more complex conditions
+            where_clause = f" WHERE {where_condition}"
+
+        sql = f"""
+        SELECT  {', '.join(select_parts)}
         FROM    Sales          s
         JOIN    Customers      c ON c.Id = s.customer_id
         JOIN    ProductsCache  p ON p.id = s.product_id
+        {where_clause}
         ORDER BY s.sale_date DESC;
         """
 
@@ -550,61 +865,36 @@ async def sales_crud(
 
         processed_results = []
         for r in rows:
-            sale_data = {
-                "sale_id": r[0],
-                "customer_first_name": r[1],
-                "customer_last_name": r[2],
-                "product_name": r[3],
-                "product_description_raw": r[4],  # Raw description
-                "quantity": r[5],
-                "unit_price": float(r[6]),
-                "total_price": float(r[7]),
-                "sale_date": r[8],
-                "customer_email": r[9]
-            }
+            # Build result dictionary dynamically based on selected columns
+            sale_data = {}
+            for i, col in enumerate(selected_columns):
+                if col == "sale_date" and r[i]:
+                    sale_data[col] = r[i]
+                elif col in ["unit_price", "total_price"] and r[i] is not None:
+                    sale_data[col] = float(r[i])
+                else:
+                    sale_data[col] = r[i]
 
-            # Apply formatting based on display_format
-            if display_format == "Data Format Conversion":
-                # Convert date to string format and remove unnecessary fields
+            # Apply formatting based on display_format (simplified for selected columns)
+            if display_format == "Data Format Conversion" and "sale_date" in sale_data:
                 sale_data["sale_date"] = sale_data["sale_date"].strftime("%Y-%m-%d %H:%M:%S") if sale_data[
                     "sale_date"] else "N/A"
-                sale_data.pop("customer_first_name", None)
-                sale_data.pop("customer_last_name", None)
-                sale_data.pop("product_description_raw", None)
-                sale_data.pop("customer_email", None)
-
             elif display_format == "Decimal Value Formatting":
-                # Format prices to 2 decimal places
-                sale_data["unit_price"] = f"{sale_data['unit_price']:.2f}"
-                sale_data["total_price"] = f"{sale_data['total_price']:.2f}"
-                sale_data.pop("customer_first_name", None)
-                sale_data.pop("customer_last_name", None)
-                sale_data.pop("product_description_raw", None)
-                sale_data.pop("customer_email", None)
-
+                for price_field in ["unit_price", "total_price"]:
+                    if price_field in sale_data and isinstance(sale_data[price_field], (int, float)):
+                        sale_data[price_field] = f"{sale_data[price_field]:.2f}"
             elif display_format == "String Concatenation":
-                # Create concatenated fields
-                sale_data[
-                    "customer_full_name"] = f"{sale_data['customer_first_name']} {sale_data['customer_last_name']}"
-                sale_data[
-                    "product_full_description"] = f"{sale_data['product_name']} ({sale_data['product_description_raw'] or 'No description'})"
-                sale_data["sale_summary"] = (
-                    f"{sale_data['customer_first_name']} {sale_data['customer_last_name']} "
-                    f"bought {sale_data['quantity']} of {sale_data['product_name']} "
-                    f"for ${sale_data['total_price']:.2f}"
-                )
-                sale_data.pop("customer_first_name", None)
-                sale_data.pop("customer_last_name", None)
-                sale_data.pop("product_description_raw", None)
-                sale_data.pop("customer_email", None)
-
+                if "customer_first_name" in sale_data and "customer_last_name" in sale_data:
+                    sale_data[
+                        "customer_full_name"] = f"{sale_data['customer_first_name']} {sale_data['customer_last_name']}"
+                if "product_name" in sale_data and "product_description" in sale_data:
+                    sale_data[
+                        "product_full_description"] = f"{sale_data['product_name']} ({sale_data['product_description'] or 'No description'})"
             elif display_format == "Null Value Removal/Handling":
-                # Skip records with null emails, handle null descriptions
-                if sale_data["customer_email"] is None:
+                if "customer_email" in sale_data and sale_data["customer_email"] is None:
                     continue  # Skip this record entirely
-                sale_data["product_description_raw"] = sale_data["product_description_raw"] or "N/A"
-                sale_data.pop("customer_first_name", None)
-                sale_data.pop("customer_last_name", None)
+                if "product_description" in sale_data:
+                    sale_data["product_description"] = sale_data["product_description"] or "N/A"
 
             processed_results.append(sale_data)
 
