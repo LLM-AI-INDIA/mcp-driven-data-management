@@ -886,7 +886,7 @@ if application == "MCP Application":
     with col2:
         # Small refresh button on main page
         st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
-        if st.button("🔄 Refresh", key="refresh_tools_main", help="Rediscover available tools"):
+        if st.button("🔄 Activate Connection", key="refresh_tools_main", help="Rediscover available tools"):
             with st.spinner("Refreshing tools..."):
                 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
                 st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
@@ -1322,5 +1322,6 @@ with st.expander("🔧 Enhanced Features & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
