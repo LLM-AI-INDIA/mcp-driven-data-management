@@ -423,7 +423,7 @@ def execute_sales_operation_with_where(operation: str, where_condition: str, **k
 # ————————————————
 # 7. Enhanced MySQL CRUD Tool (Customers) with Smart Name Resolution
 # ————————————————
-@mcp.tool()
+@mcp.tool(name="CustomerManagement", description="Create, list, update, or delete customers in the MySQL customer database")
 async def sqlserver_crud(
         operation: str,
         name: str = None,
@@ -565,7 +565,7 @@ async def sqlserver_crud(
 # ————————————————
 # 8. Enhanced PostgreSQL CRUD Tool (Products) with Smart Name Resolution
 # ————————————————
-@mcp.tool()
+@mcp.tool(name="ProductManagement", description="Manage products in the PostgreSQL products database: add, list, update, or delete")
 async def postgresql_crud(
         operation: str,
         name: str = None,
@@ -697,7 +697,7 @@ async def postgresql_crud(
 # ————————————————
 # 9. Enhanced Sales CRUD Tool with Column Filtering and WHERE Clause Support
 # ————————————————
-@mcp.tool()
+@mcp.tool(name="SalesManagement", description="Manage sales records across customers and products: create, update, delete, query sales in PostgreSQL")
 async def sales_crud(
         operation: str,
         customer_id: int = None,
@@ -916,3 +916,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 8000))
     mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+
