@@ -295,6 +295,15 @@ def generate_tool_descriptions(tools_dict: dict) -> str:
     return "\n".join(descriptions)
 
 
+def get_image_base64(img_path):
+    img = Image.open(img_path)
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_bytes = buffered.getvalue()
+    img_base64 = base64.b64encode(img_bytes).decode()
+    return img_base64
+
+
 # ========== SIDEBAR NAVIGATION ==========
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>Solutions Scope</div>", unsafe_allow_html=True)
@@ -354,7 +363,6 @@ with st.sidebar:
     st.markdown(
         """
         <div class="sidebar-logo-row">
-            <img src="https://media.licdn.com/dms/image/v2/D560BAQFIon13R1UG4g/company-logo_200_200/company-logo_200_200/0/1733990910443/llm_at_scale_logo?e=2147483647&v=beta&t=WtAgFOcGQuTS0aEIqZhNMzWraHwL6FU0z5EPyPrty04" title="LLM at Scale AI">
             <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud">
             <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS">
             <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud">
@@ -365,27 +373,17 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-def get_image_base64(img_path):
-    img = Image.open(img_path)
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_bytes = buffered.getvalue()
-    img_base64 = base64.b64encode(img_bytes).decode()
-    return img_base64
+# Updated to use GitHub URL directly
+logo_url = "https://github.com/lokit-s/mcp/blob/main/Picture1.png?raw=true"
+st.markdown(
+    f"""
+    <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
+        <img src='{logo_url}' width='220'>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
-logo_path = "Picture1.png"
-logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
-if logo_base64:
-    st.markdown(
-        f"""
-        <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
-            <img src='data:image/png;base64,{logo_base64}' width='220'>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    
 st.markdown(
     """
     <div style="
@@ -401,7 +399,7 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-           MCP-Driven Data Management With Natural Language
+            MCP-Driven Data Management With Natural Language
         </span>
         <span style="
             font-size: 1.15rem;
@@ -462,13 +460,16 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
     """Validate and clean parameters for specific tools"""
 
     if tool_name == "sales_crud":
-        # Define allowed parameters for sales_crud
+        # Define allowed parameters for sales_crud (with WHERE clause support)
         allowed_params = {
             'operation', 'customer_id', 'product_id', 'quantity',
             'unit_price', 'total_amount', 'sale_id', 'new_quantity',
             'table_name', 'display_format', 'customer_name',
-            'product_name', 'email', 'total_price', 'columns',
-            'where_condition', 'new_price'  # NEW PARAMETERS ADDED
+            'product_name', 'email', 'total_price',
+            'columns',  # Column selection
+            'where_clause',  # WHERE conditions
+            'filter_conditions',  # Structured filters
+            'limit'  # Row limit
         }
 
         # Clean args to only include allowed parameters
@@ -483,8 +484,32 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
                 'Null Value Removal/Handling'
             ]
             if cleaned_args['display_format'] not in valid_formats:
-                # Remove invalid display_format
                 cleaned_args.pop('display_format', None)
+
+        # Clean up columns parameter
+        if 'columns' in cleaned_args:
+            if isinstance(cleaned_args['columns'], str) and cleaned_args['columns'].strip():
+                columns_str = cleaned_args['columns'].strip()
+                columns_list = [col.strip() for col in columns_str.split(',') if col.strip()]
+                cleaned_args['columns'] = ','.join(columns_list)
+            else:
+                cleaned_args.pop('columns', None)
+
+        # Validate WHERE clause
+        if 'where_clause' in cleaned_args:
+            if not isinstance(cleaned_args['where_clause'], str) or not cleaned_args['where_clause'].strip():
+                cleaned_args.pop('where_clause', None)
+
+        # Validate limit
+        if 'limit' in cleaned_args:
+            try:
+                limit_val = int(cleaned_args['limit'])
+                if limit_val <= 0 or limit_val > 1000:  # Reasonable limits
+                    cleaned_args.pop('limit', None)
+                else:
+                    cleaned_args['limit'] = limit_val
+            except (ValueError, TypeError):
+                cleaned_args.pop('limit', None)
 
         return cleaned_args
 
@@ -558,7 +583,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Parse user query with fully dynamic tool selection and new WHERE/column filtering support"""
+    """Enhanced parse user query with display format detection"""
 
     if not available_tools:
         return {"error": "No tools available"}
@@ -571,100 +596,166 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     tools_description = "\n".join(tool_info)
 
     system_prompt = (
-        "You are an intelligent sales agent and database router for CRUD operations. "
-        "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
+        "You are an intelligent database router for CRUD operations. "
+        "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
 
         "RESPONSE FORMAT:\n"
         "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
 
         "ACTION MAPPING:\n"
         "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-        "- 'create': for adding, inserting, or creating new records (orders, customers, products)\n"
+        "- 'create': for adding, inserting, or creating NEW records\n"
         "- 'update': for modifying, changing, or updating existing records\n"
         "- 'delete': for removing, deleting, or destroying records\n"
         "- 'describe': for showing table structure, schema, or column information\n\n"
 
-        "NEW FEATURES - COLUMN FILTERING & WHERE CLAUSES:\n"
-        "For sales_crud tool, support these advanced parameters:\n\n"
-
-        "COLUMN FILTERING:\n"
-        "- 'columns': comma-separated list of specific columns to return\n"
-        "- Look for patterns like: 'show only product_name and quantity', 'select customer name and price'\n"
-        "- Available columns: 'sale_id', 'customer_first_name', 'customer_last_name', 'product_name', 'product_description', 'quantity', 'unit_price', 'total_price', 'sale_date', 'customer_email'\n"
-        "- Examples:\n"
-        "  - 'show product names and quantities' → columns: 'product_name,quantity'\n"
-        "  - 'display customer names and prices' → columns: 'customer_first_name,customer_last_name,total_price'\n\n"
-
-        "WHERE CLAUSE SUPPORT:\n"
-        "- 'where_condition': SQL WHERE clause conditions for filtering\n"
-        "- For READ operations: filter displayed results\n"
-        "- For UPDATE/DELETE operations: bulk operations on matching records\n"
-        "- Examples:\n"
-        "  - 'sales where price > 14' → where_condition: 's.unit_price > 14'\n"
-        "  - 'update sales where quantity >= 2' → where_condition: 'quantity >= 2'\n"
-        "  - 'delete sales where customer_id = 1' → where_condition: 'customer_id = 1'\n"
-        "  - 'show sales for Alice' → where_condition: 'c.FirstName = \"Alice\"'\n\n"
-
-        "WHERE CONDITION PATTERNS:\n"
-        "- Price conditions: 'price > X', 'unit_price = X', 'total_price BETWEEN X AND Y'\n"
-        "- Quantity conditions: 'quantity >= X', 'quantity = X'\n"
-        "- Customer conditions: 'customer_id = X', 'c.FirstName = \"NAME\"'\n"
-        "- Product conditions: 'product_id = X', 'p.name = \"PRODUCT\"'\n"
-        "- Date conditions: 'sale_date >= \"YYYY-MM-DD\"'\n\n"
-
-        "BULK OPERATIONS WITH WHERE:\n"
-        "- 'update sales where price > 14 set quantity to 5' → action: 'update', where_condition: 'unit_price > 14', new_quantity: 5\n"
-        "- 'delete sales where quantity = 1' → action: 'delete', where_condition: 'quantity = 1'\n"
-        "- 'update price to 20 where product is Widget' → action: 'update', where_condition: 'p.name = \"Widget\"', new_price: 20\n\n"
-
-        "ENHANCED NAME DETECTION FOR DELETE/UPDATE OPERATIONS:\n"
-        "When user mentions delete/update operations with names, always extract and include 'name' parameter:\n"
-        "Examples:\n"
-        "- 'delete customer Alice' → extract 'name': 'Alice'\n"
-        "- 'delete Alice Johnson' → extract 'name': 'Alice Johnson'\n"
-        "- 'delete Johnson' → extract 'name': 'Johnson'\n"
-        "- 'remove customer Bob' → extract 'name': 'Bob'\n"
-        "- 'delete product Widget' → extract 'name': 'Widget'\n"
-        "- 'update price of Gadget' → extract 'name': 'Gadget'\n"
-        "- 'change price of Tool to 30' → extract 'name': 'Tool' and 'new_price': 30\n\n"
-
-        "SALES ETL DISPLAY FORMATTING:\n"
-        "For sales_crud tool, when user requests data formatting or conversion, use these EXACT display_format values:\n"
-        "- 'Data Format Conversion' - for date formatting and data conversion\n"
-        "- 'Decimal Value Formatting' - for price formatting to 2 decimal places\n"
-        "- 'String Concatenation' - for combining fields into readable summaries\n"
-        "- 'Null Value Removal/Handling' - for cleaning null values\n\n"
-
-        "TOOL SELECTION GUIDELINES:\n"
-        "- Analyze the user's business intent and match it with the most relevant tool description\n"
-        "- Consider what type of data the user is asking about:\n"
-        "  * Customer data: names, emails, contact information, customer management\n"
-        "  * Product data: inventory, catalog, pricing, product details\n"
-        "  * Sales data: transactions, orders, revenue, purchase history, analytics\n"
-        "- Choose the tool whose description best matches the user's request\n"
-        "- For sales queries, prioritize tools that handle transaction and sales data\n\n"
-
-        "ARGUMENT EXTRACTION:\n"
-        "- For sales operations: extract customer_id, product_id, quantity, unit_price\n"
-        "- For updates: include new_quantity, sale_id, new_email, new_price\n"
-        "- For ETL/formatting: include display_format with exact string match\n"
-        "- For column filtering: include 'columns' parameter\n"
-        "- For WHERE clauses: include 'where_condition' parameter\n"
-        "- For delete/update by name: ALWAYS include 'name' parameter when names are mentioned\n\n"
+        "CRITICAL TOOL SELECTION RULES:\n"
+        "\n"
+        "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
+        "   - 'list products', 'show products', 'display products'\n"
+        "   - 'product inventory', 'product catalog', 'product information'\n"
+        "   - 'add product', 'create product', 'new product'\n"
+        "   - 'update product', 'change product price', 'modify product'\n"
+        "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
+        "   - Any query primarily about products, pricing, or inventory\n"
+        "\n"
+        "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
+        "   - 'list customers', 'show customers', 'display customers'\n"
+        "   - 'customer information', 'customer details'\n"
+        "   - 'add customer', 'create customer', 'new customer'\n"
+        "   - 'update customer', 'change customer email', 'modify customer'\n"
+        "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
+        "   - Any query primarily about customers, names, or emails\n"
+        "\n"
+        "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
+        "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
+        "   - 'sales report', 'revenue data', 'purchase history'\n"
+        "   - 'who bought what', 'customer purchases'\n"
+        "   - Cross-database queries combining customer + product + sales info\n"
+        "   - 'create sale', 'add sale', 'new transaction'\n"
+        "   - Any query asking for combined data from multiple tables\n"
+        "   - ETL formatting queries with display_format parameter\n"
+        "\n"
+        "ENHANCED DISPLAY FORMAT DETECTION (CRITICAL FOR SALES_CRUD):\n"
+        "\n"
+        "For sales_crud queries, detect display_format from these EXACT patterns:\n"
+        "\n"
+        "DATA FORMAT CONVERSION PATTERNS:\n"
+        "- 'with Data Format Conversion' → {\"display_format\": \"Data Format Conversion\"}\n"
+        "- 'using Data Format Conversion format' → {\"display_format\": \"Data Format Conversion\"}\n"
+        "- 'Data Format Conversion' (exact match) → {\"display_format\": \"Data Format Conversion\"}\n"
+        "\n"
+        "DECIMAL VALUE FORMATTING PATTERNS:\n"
+        "- 'with Decimal Value Formatting' → {\"display_format\": \"Decimal Value Formatting\"}\n"
+        "- 'using Decimal Value Formatting format' → {\"display_format\": \"Decimal Value Formatting\"}\n"
+        "- 'Decimal Value Formatting' (exact match) → {\"display_format\": \"Decimal Value Formatting\"}\n"
+        "\n"
+        "STRING CONCATENATION PATTERNS:\n"
+        "- 'with String Concatenation' → {\"display_format\": \"String Concatenation\"}\n"
+        "- 'using String Concatenation format' → {\"display_format\": \"String Concatenation\"}\n"
+        "- 'String Concatenation' (exact match) → {\"display_format\": \"String Concatenation\"}\n"
+        "\n"
+        "NULL VALUE REMOVAL/HANDLING PATTERNS:\n"
+        "- 'with Null Value Removal/Handling' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
+        "- 'using Null Value Removal/Handling format' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
+        "- 'Null Value Removal/Handling' (exact match) → {\"display_format\": \"Null Value Removal/Handling\"}\n"
+        "- 'null handling' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
+        "- 'clean sales data with null handling' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
+        "\n"
+        "EXAMPLES OF DISPLAY FORMAT EXTRACTION:\n"
+        "\n"
+        "Query: 'show sales with Data Format Conversion'\n"
+        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
+        "\n"
+        "Query: 'display sales using Decimal Value Formatting format'\n"
+        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
+        "\n"
+        "Query: 'sales with String Concatenation'\n"
+        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
+        "\n"
+        "Query: 'clean sales data with null handling'\n"
+        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
+        "\n"
+        "ENHANCED DELETE OPERATION EXTRACTION:\n"
+        "\n"
+        "For DELETE operations, extract the entity name from these patterns:\n"
+        "\n"
+        "PRODUCT DELETE PATTERNS:\n"
+        "- 'delete [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "- 'delete product [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "- 'remove [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "- 'remove product [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "\n"
+        "CUSTOMER DELETE PATTERNS:\n"
+        "- 'delete [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "- 'delete customer [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "- 'remove [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "- 'remove customer [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "\n"
+        "ENHANCED UPDATE OPERATION EXTRACTION:\n"
+        "\n"
+        "For UPDATE operations, extract both the entity name and new value:\n"
+        "\n"
+        "PRODUCT UPDATE PATTERNS:\n"
+        "- 'update price of [ProductName] to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
+        "- 'change price of [ProductName] to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
+        "- 'set [ProductName] price to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
+        "\n"
+        "CUSTOMER UPDATE PATTERNS:\n"
+        "- 'update email of [CustomerName] to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
+        "- 'change email of [CustomerName] to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
+        "- 'set [CustomerName] email to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
+        "\n"
+        "ENHANCED COLUMN SELECTION EXTRACTION:\n"
+        "\n"
+        "For queries that request specific columns, extract them into the 'columns' parameter:\n"
+        "\n"
+        "COLUMN EXTRACTION PATTERNS:\n"
+        "- 'show customer_first_name, total_price' → {\"columns\": \"customer_first_name,total_price\"}\n"
+        "- 'display customer_first_name and total_price' → {\"columns\": \"customer_first_name,total_price\"}\n"
+        "- 'show only customer and price' → {\"columns\": \"customer_first_name,total_price\"}\n"
+        "\n"
+        "ENHANCED WHERE CLAUSE EXTRACTION:\n"
+        "\n"
+        "Extract filtering conditions from natural language and add them to 'where_condition' parameter:\n"
+        "\n"
+        "WHERE CLAUSE PATTERNS:\n"
+        "- 'sales where price > 14' → {\"where_condition\": \"s.total_price > 14\"}\n"
+        "- 'sales where quantity >= 2' → {\"where_condition\": \"s.quantity >= 2\"}\n"
+        "- 'sales for customer Alice' → {\"where_condition\": \"c.FirstName = 'Alice'\"}\n"
+        "\n"
 
         f"AVAILABLE TOOLS:\n{tools_description}\n\n"
 
-        "EXAMPLES WITH NEW FEATURES:\n"
-        "Query: 'show sales with only product name and quantity' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{\"columns\": \"product_name,quantity\"}}}}\n"
-        "Query: 'display sales where price > 15' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{\"where_condition\": \"s.unit_price > 15\"}}}}\n"
-        "Query: 'show customer names and prices for expensive sales' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{\"columns\": \"customer_first_name,customer_last_name,total_price\", \"where_condition\": \"s.total_price > 20\"}}}}\n"
-        "Query: 'update sales where price > 14 set quantity to 3' → {{\"tool\": \"sales_crud\", \"action\": \"update\", \"args\": {{\"where_condition\": \"unit_price > 14\", \"new_quantity\": 3}}}}\n"
-        "Query: 'delete sales where quantity = 1' → {{\"tool\": \"sales_crud\", \"action\": \"delete\", \"args\": {{\"where_condition\": \"quantity = 1\"}}}}\n"
-        "Query: 'delete customer Alice' → {{\"tool\": \"sqlserver_crud\", \"action\": \"delete\", \"args\": {{\"name\": \"Alice\"}}}}\n"
-        "Query: 'show all sales' → {{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {{}}}}\n"
+        "CRITICAL: Always analyze the PRIMARY INTENT of the query:\n"
+        "- If asking about PRODUCTS specifically → postgresql_crud\n"
+        "- If asking about CUSTOMERS specifically → sqlserver_crud\n"
+        "- If asking about SALES/TRANSACTIONS or ETL formatting → sales_crud\n"
+        "\n"
+        "FOR DISPLAY FORMAT DETECTION:\n"
+        "1. Look for exact ETL format names in the query\n"
+        "2. Match patterns like 'with [FormatName]', 'using [FormatName] format'\n"
+        "3. Add to display_format parameter with exact string match\n"
+        "4. Only apply to sales_crud queries\n"
     )
 
-    user_prompt = f"User query: \"{query}\"\n\nAnalyze the query and respond with the exact JSON format. Extract column filtering, WHERE conditions, and names for operations."
+    user_prompt = f"""User query: "{query}"
+
+Analyze the query step by step:
+
+1. What is the PRIMARY INTENT? (product, customer, or sales operation)
+2. What ACTION is being requested? (create, read, update, delete, describe)
+3. What DISPLAY FORMAT is requested? (for sales queries - extract exact format name)
+4. What ENTITY NAME needs to be extracted? (for delete/update operations)
+5. What SPECIFIC COLUMNS are requested? (for read operations)
+6. What FILTER CONDITIONS are specified? (for read operations)
+
+DISPLAY FORMAT DETECTION (CRITICAL):
+- Look for exact format names: "Data Format Conversion", "Decimal Value Formatting", "String Concatenation", "Null Value Removal/Handling"
+- Match patterns: "with [FormatName]", "using [FormatName] format", "[FormatName]"
+- For null handling: also match "null handling", "clean data with null"
+
+Respond with the exact JSON format with properly extracted parameters."""
 
     try:
         messages = [
@@ -681,14 +772,102 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
             try:
                 result = ast.literal_eval(raw)
             except:
-                # Last resort parsing
                 result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
 
         # Normalize action names
         if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
             result["action"] = "read"
 
-        # Validate and clean args - remove any unexpected parameters
+        # Enhanced parameter extraction for read operations with display_format detection
+        if result.get("action") == "read" and result.get("tool") == "sales_crud":
+            args = result.get("args", {})
+
+            # Extract display_format if not already extracted
+            if "display_format" not in args:
+                import re
+
+                # Look for exact display format patterns
+                display_format_patterns = [
+                    (r'Data Format Conversion', 'Data Format Conversion'),
+                    (r'Decimal Value Formatting', 'Decimal Value Formatting'),
+                    (r'String Concatenation', 'String Concatenation'),
+                    (r'Null Value Removal/Handling', 'Null Value Removal/Handling'),
+                    (r'null handling', 'Null Value Removal/Handling'),
+                    (r'clean.*?null.*?handling', 'Null Value Removal/Handling'),
+                    (r'handle.*?null.*?values', 'Null Value Removal/Handling'),
+                ]
+
+                for pattern, format_name in display_format_patterns:
+                    if re.search(pattern, query, re.IGNORECASE):
+                        args["display_format"] = format_name
+                        print(f"DEBUG: Extracted display_format '{format_name}' from query '{query}'")
+                        break
+
+            # Extract columns if not already extracted
+            if "columns" not in args:
+                import re
+
+                # Look for column specification patterns
+                column_patterns = [
+                    r'(?:show|display|get|select)\s+only\s+(.+?)(?:\s+from|\s+where|\s*$)',
+                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
+                ]
+
+                for pattern in column_patterns:
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        columns_text = match.group(1).strip()
+
+                        # Clean up and standardize column names
+                        if 'and' in columns_text or ',' in columns_text:
+                            # Multiple columns
+                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
+                            cleaned_columns = []
+
+                            for col in columns_list:
+                                col = col.strip().lower().replace(' ', '_')
+                                # Map common variations
+                                if col in ['name', 'customer']:
+                                    cleaned_columns.append('customer_first_name')
+                                elif col in ['price', 'total', 'amount']:
+                                    cleaned_columns.append('total_price')
+                                elif col in ['product']:
+                                    cleaned_columns.append('product_name')
+                                elif col in ['date']:
+                                    cleaned_columns.append('sale_date')
+                                elif col in ['email']:
+                                    cleaned_columns.append('customer_email')
+                                else:
+                                    cleaned_columns.append(col)
+
+                            if cleaned_columns:
+                                args["columns"] = ','.join(cleaned_columns)
+                        break
+
+            # Extract where_condition if not already extracted
+            if "where_condition" not in args:
+                import re
+
+                # Look for filtering conditions
+                where_patterns = [
+                    (r'where\s+price\s*>\s*(\d+)', lambda m: f"s.total_price > {m.group(1)}"),
+                    (r'where\s+quantity\s*>=?\s*(\d+)', lambda m: f"s.quantity >= {m.group(1)}"),
+                    (r'for\s+customer\s+([A-Za-z\s]+)', lambda m: f"c.FirstName = '{m.group(1).strip()}'"),
+                ]
+
+                for pattern, formatter in where_patterns:
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        args["where_condition"] = formatter(match)
+                        print(f"DEBUG: Extracted where_condition '{args['where_condition']}' from query '{query}'")
+                        break
+
+            result["args"] = args
+
+        # Keep all your existing parameter extraction logic for other operations...
+        # [Rest of your existing code for delete, update, create operations]
+
+        # Validate and clean args
         if "args" in result and isinstance(result["args"], dict):
             cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
             result["args"] = cleaned_args
@@ -697,10 +876,461 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         if "tool" in result and result["tool"] not in available_tools:
             result["tool"] = list(available_tools.keys())[0]
 
+        # Debug output
+        print(f"DEBUG: Final parsed result for '{query}': {result}")
+
         return result
 
     except Exception as e:
-        # Fallback response if LLM call fails
+        return {
+            "tool": list(available_tools.keys())[0] if available_tools else None,
+            "action": "read",
+            "args": {},
+            "error": f"Failed to parse query: {str(e)}"
+        }
+
+    if not available_tools:
+        return {"error": "No tools available"}
+
+    # Build comprehensive tool information for the LLM
+    tool_info = []
+    for tool_name, tool_desc in available_tools.items():
+        tool_info.append(f"- **{tool_name}**: {tool_desc}")
+
+    tools_description = "\n".join(tool_info)
+
+    system_prompt = (
+        "You are an intelligent database router for CRUD operations. "
+        "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
+
+        "RESPONSE FORMAT:\n"
+        "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
+
+        "ACTION MAPPING:\n"
+        "- 'read': for viewing, listing, showing, displaying, or getting records\n"
+        "- 'create': for adding, inserting, or creating NEW records\n"
+        "- 'update': for modifying, changing, or updating existing records\n"
+        "- 'delete': for removing, deleting, or destroying records\n"
+        "- 'describe': for showing table structure, schema, or column information\n\n"
+
+        "CRITICAL TOOL SELECTION RULES:\n"
+        "\n"
+        "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
+        "   - 'list products', 'show products', 'display products'\n"
+        "   - 'product inventory', 'product catalog', 'product information'\n"
+        "   - 'add product', 'create product', 'new product'\n"
+        "   - 'update product', 'change product price', 'modify product'\n"
+        "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
+        "   - Any query primarily about products, pricing, or inventory\n"
+        "\n"
+        "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
+        "   - 'list customers', 'show customers', 'display customers'\n"
+        "   - 'customer information', 'customer details'\n"
+        "   - 'add customer', 'create customer', 'new customer'\n"
+        "   - 'update customer', 'change customer email', 'modify customer'\n"
+        "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
+        "   - Any query primarily about customers, names, or emails\n"
+        "\n"
+        "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
+        "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
+        "   - 'sales report', 'revenue data', 'purchase history'\n"
+        "   - 'who bought what', 'customer purchases'\n"
+        "   - Cross-database queries combining customer + product + sales info\n"
+        "   - 'create sale', 'add sale', 'new transaction'\n"
+        "   - Any query asking for combined data from multiple tables\n"
+        "\n"
+        "ENHANCED DELETE OPERATION EXTRACTION:\n"
+        "\n"
+        "For DELETE operations, extract the entity name from these patterns:\n"
+        "\n"
+        "PRODUCT DELETE PATTERNS:\n"
+        "- 'delete [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "- 'delete product [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "- 'remove [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "- 'remove product [ProductName]' → {\"name\": \"ProductName\"}\n"
+        "\n"
+        "CUSTOMER DELETE PATTERNS:\n"
+        "- 'delete [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "- 'delete customer [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "- 'remove [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "- 'remove customer [CustomerName]' → {\"name\": \"CustomerName\"}\n"
+        "\n"
+        "EXAMPLES OF CORRECT DELETE EXTRACTION:\n"
+        "\n"
+        "Query: 'delete Widget'\n"
+        "→ {\"tool\": \"postgresql_crud\", \"action\": \"delete\", \"args\": {\"name\": \"Widget\"}}\n"
+        "\n"
+        "Query: 'delete product Gadget'\n"
+        "→ {\"tool\": \"postgresql_crud\", \"action\": \"delete\", \"args\": {\"name\": \"Gadget\"}}\n"
+        "\n"
+        "Query: 'remove Tool'\n"
+        "→ {\"tool\": \"postgresql_crud\", \"action\": \"delete\", \"args\": {\"name\": \"Tool\"}}\n"
+        "\n"
+        "Query: 'delete customer Alice'\n"
+        "→ {\"tool\": \"sqlserver_crud\", \"action\": \"delete\", \"args\": {\"name\": \"Alice\"}}\n"
+        "\n"
+        "Query: 'delete Alice Johnson'\n"
+        "→ {\"tool\": \"sqlserver_crud\", \"action\": \"delete\", \"args\": {\"name\": \"Alice Johnson\"}}\n"
+        "\n"
+        "Query: 'remove customer Bob Smith'\n"
+        "→ {\"tool\": \"sqlserver_crud\", \"action\": \"delete\", \"args\": {\"name\": \"Bob Smith\"}}\n"
+        "\n"
+        "ENHANCED UPDATE OPERATION EXTRACTION:\n"
+        "\n"
+        "For UPDATE operations, extract both the entity name and new value:\n"
+        "\n"
+        "PRODUCT UPDATE PATTERNS:\n"
+        "- 'update price of [ProductName] to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
+        "- 'change price of [ProductName] to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
+        "- 'set [ProductName] price to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
+        "\n"
+        "CUSTOMER UPDATE PATTERNS:\n"
+        "- 'update email of [CustomerName] to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
+        "- 'change email of [CustomerName] to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
+        "- 'set [CustomerName] email to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
+        "\n"
+        "ENHANCED COLUMN SELECTION EXTRACTION:\n"
+        "\n"
+        "For queries that request specific columns, extract them into the 'columns' parameter:\n"
+        "\n"
+        "COLUMN EXTRACTION PATTERNS:\n"
+        "- 'show customer_name, total_price' → {\"columns\": \"customer_name,total_price\"}\n"
+        "- 'display customer_name and total_price' → {\"columns\": \"customer_name,total_price\"}\n"
+        "- 'get name and price' → {\"columns\": \"customer_name,total_price\"}\n"
+        "- 'show only customer and price' → {\"columns\": \"customer_name,total_price\"}\n"
+        "- 'display customer_name, total_price from sales' → {\"columns\": \"customer_name,total_price\"}\n"
+        "\n"
+        "COLUMN NAME MAPPING:\n"
+        "- 'name' → 'customer_name' (for sales queries)\n"
+        "- 'customer' → 'customer_name'\n"
+        "- 'price' → 'total_price' (default for sales)\n"
+        "- 'total' → 'total_price'\n"
+        "- 'amount' → 'total_price'\n"
+        "- 'product' → 'product_name'\n"
+        "- 'date' → 'sale_date'\n"
+        "- 'email' → 'customer_email'\n"
+        "- 'quantity' → 'quantity'\n"
+        "\n"
+        "ENHANCED WHERE CLAUSE EXTRACTION:\n"
+        "\n"
+        "Extract filtering conditions from natural language and add them to 'where_clause' parameter:\n"
+        "\n"
+        "WHERE CLAUSE PATTERNS:\n"
+        "- 'sales with total price exceed $50' → {\"where_clause\": \"total_price > 50\"}\n"
+        "- 'sales where total exceeds 50' → {\"where_clause\": \"total_price > 50\"}\n"
+        "- 'show sales with total price above 25' → {\"where_clause\": \"total_price > 25\"}\n"
+        "- 'sales with price greater than 100' → {\"where_clause\": \"total_price > 100\"}\n"
+        "- 'sales with quantity more than 2' → {\"where_clause\": \"quantity > 2\"}\n"
+        "- 'sales where customer is Alice' → {\"where_clause\": \"customer_name = 'Alice'\"}\n"
+        "- 'sales by Alice Johnson' → {\"where_clause\": \"customer_name = 'Alice Johnson'\"}\n"
+        "- 'sales for product Widget' → {\"where_clause\": \"product_name = 'Widget'\"}\n"
+        "\n"
+        "CUSTOMER CREATE PATTERNS (Enhanced):\n"
+        "- 'create customer [FirstName LastName] with [email]'\n"
+        "- 'add customer [FirstName LastName] with email [email]'\n"
+        "- 'new customer [FirstName LastName] [email]'\n"
+        "- 'add [FirstName LastName] with [email]'\n"
+        "- 'create [FirstName LastName] [email]'\n"
+        "\n"
+        "PRODUCT CREATE PATTERNS:\n"
+        "- 'create product [ProductName] with price [price]'\n"
+        "- 'add product [ProductName] for $[price]'\n"
+        "- 'new product [ProductName] priced at [price]'\n"
+        "\n"
+        "LIMIT SUPPORT:\n"
+        "Extract row limits from queries:\n"
+        "- 'show first 5 sales' → {\"limit\": 5}\n"
+        "- 'list top 10 customers' → {\"limit\": 10}\n"
+        "- 'display last 3 sales' → {\"limit\": 3}\n"
+
+        f"AVAILABLE TOOLS:\n{tools_description}\n\n"
+
+        "CRITICAL: Always analyze the PRIMARY INTENT of the query:\n"
+        "- If asking about PRODUCTS specifically → postgresql_crud\n"
+        "- If asking about CUSTOMERS specifically → sqlserver_crud\n"
+        "- If asking about SALES/TRANSACTIONS or CROSS-TABLE data → sales_crud\n"
+        "\n"
+        "FOR DELETE OPERATIONS:\n"
+        "1. Identify what is being deleted (product, customer, or sale)\n"
+        "2. Extract the entity name from the query\n"
+        "3. Put the name in the 'name' parameter\n"
+        "4. Choose the correct tool based on the entity type\n"
+        "\n"
+        "FOR UPDATE OPERATIONS:\n"
+        "1. Identify what is being updated (product price, customer email)\n"
+        "2. Extract the entity name and the new value\n"
+        "3. Use proper parameter names: 'name' + 'new_price' or 'name' + 'new_email'\n"
+        "\n"
+        "FOR CREATE OPERATIONS:\n"
+        "1. Identify the entity being created (customer, product, sale)\n"
+        "2. Extract ALL required parameters from the natural language\n"
+        "3. Use proper field names: 'name' for names, 'email' for emails, 'price' for product prices\n"
+        "4. Ensure all extracted values are properly formatted\n"
+    )
+
+    user_prompt = f"""User query: "{query}"
+
+Analyze the query step by step:
+
+1. What is the PRIMARY INTENT? (product, customer, or sales operation)
+2. What ACTION is being requested? (create, read, update, delete, describe)
+3. What ENTITY NAME needs to be extracted? (for delete/update operations)
+4. What SPECIFIC COLUMNS are requested? (for read operations - extract into 'columns' parameter)
+5. What FILTER CONDITIONS are specified? (for read operations - extract into 'where_clause' parameter)
+6. What PARAMETERS need to be extracted from the natural language?
+
+ENTITY NAME EXTRACTION GUIDELINES (CRITICAL FOR DELETE/UPDATE):
+- For "delete Widget" → extract "Widget" and put in 'name' parameter
+- For "delete product Gadget" → extract "Gadget" and put in 'name' parameter  
+- For "delete customer Alice" → extract "Alice" and put in 'name' parameter
+- For "update price of Tool to 30" → extract "Tool" and put in 'name' parameter, extract "30" and put in 'new_price'
+
+COLUMN EXTRACTION GUIDELINES:
+- Look for patterns like "show X, Y", "display X and Y", "get X, Y from Z"
+- Extract only the column names, map them to standard names
+- Put them in a comma-separated string in the 'columns' parameter
+
+WHERE CLAUSE EXTRACTION GUIDELINES:
+- Look for filtering conditions like "exceed", "above", "greater than", "with price over"
+- Convert natural language to SQL-like conditions
+- Handle currency symbols and numbers properly
+- Put the condition in the 'where_clause' parameter
+
+Respond with the exact JSON format with properly extracted parameters."""
+
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+        resp = groq_client.invoke(messages)
+
+        raw = _clean_json(resp.content)
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            try:
+                result = ast.literal_eval(raw)
+            except:
+                result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
+
+        # Normalize action names
+        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
+            result["action"] = "read"
+
+        # ENHANCED parameter extraction for DELETE and UPDATE operations
+        if result.get("action") in ["delete", "update"]:
+            args = result.get("args", {})
+
+            # Extract entity name for delete/update operations if not already extracted
+            if "name" not in args:
+                import re
+
+                # Enhanced regex patterns for delete operations
+                delete_patterns = [
+                    r'(?:delete|remove)\s+(?:product\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
+                    r'(?:delete|remove)\s+(?:customer\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
+                    r'(?:delete|remove)\s+([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)'
+                ]
+
+                # Enhanced regex patterns for update operations
+                update_patterns = [
+                    r'(?:update|change|set)\s+(?:price\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
+                    r'(?:update|change|set)\s+(?:email\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
+                    r'(?:update|change|set)\s+([A-Za-z][A-Za-z0-9\s]*?)\s+(?:price|email)\s+(?:to|=)',
+                ]
+
+                all_patterns = delete_patterns + update_patterns
+
+                for pattern in all_patterns:
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        extracted_name = match.group(1).strip()
+                        # Clean up common words that might be captured
+                        stop_words = ['product', 'customer', 'price', 'email', 'to', 'of', 'the', 'a', 'an']
+                        name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
+                        if name_words:
+                            args["name"] = ' '.join(name_words)
+                            print(f"DEBUG: Extracted name '{args['name']}' from query '{query}'")
+                            break
+
+            # Extract new_price for product updates
+            if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
+                import re
+                price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
+                if price_match:
+                    args["new_price"] = float(price_match.group(1))
+                    print(f"DEBUG: Extracted new_price '{args['new_price']}' from query '{query}'")
+
+            # Extract new_email for customer updates
+            if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
+                import re
+                email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
+                if email_match:
+                    args["new_email"] = email_match.group(1)
+                    print(f"DEBUG: Extracted new_email '{args['new_email']}' from query '{query}'")
+
+            result["args"] = args
+
+        # Enhanced parameter extraction for create operations
+        elif result.get("action") == "create":
+            args = result.get("args", {})
+
+            # Extract name and email from query if not already extracted
+            if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
+                # Try to extract name and email using regex patterns
+                import re
+
+                # Extract email
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
+                if email_match and "email" not in args:
+                    args["email"] = email_match.group(0)
+
+                # Extract name (everything between 'customer' and 'with' or before email)
+                if "name" not in args:
+                    # Pattern 1: "create customer [Name] with [email]"
+                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query,
+                                           re.IGNORECASE)
+                    if not name_match:
+                        # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
+                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query,
+                                               re.IGNORECASE)
+                    if not name_match:
+                        # Pattern 3: Extract everything before the email
+                        if email_match:
+                            name_part = query[:email_match.start()].strip()
+                            name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
+
+                    if name_match:
+                        extracted_name = name_match.group(1).strip()
+                        # Clean up common words
+                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name,
+                                                flags=re.IGNORECASE).strip()
+                        if extracted_name:
+                            args["name"] = extracted_name
+
+            result["args"] = args
+
+        # Enhanced parameter extraction for read operations with columns and where_clause
+        elif result.get("action") == "read" and result.get("tool") == "sales_crud":
+            args = result.get("args", {})
+
+            # Extract columns if not already extracted
+            if "columns" not in args:
+                import re
+
+                # Look for column specification patterns
+                column_patterns = [
+                    r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
+                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
+                    r'display\s+(.+?)(?:\s+from|\s*$)',
+                ]
+
+                for pattern in column_patterns:
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        columns_text = match.group(1).strip()
+
+                        # Clean up and standardize column names
+                        if 'and' in columns_text or ',' in columns_text:
+                            # Multiple columns
+                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
+                            cleaned_columns = []
+
+                            for col in columns_list:
+                                col = col.strip().lower().replace(' ', '_')
+                                # Map common variations
+                                if col in ['name', 'customer']:
+                                    cleaned_columns.append('customer_name')
+                                elif col in ['price', 'total', 'amount']:
+                                    cleaned_columns.append('total_price')
+                                elif col in ['product']:
+                                    cleaned_columns.append('product_name')
+                                elif col in ['date']:
+                                    cleaned_columns.append('sale_date')
+                                elif col in ['email']:
+                                    cleaned_columns.append('customer_email')
+                                else:
+                                    cleaned_columns.append(col)
+
+                            if cleaned_columns:
+                                args["columns"] = ','.join(cleaned_columns)
+                        else:
+                            # Single column
+                            col = columns_text.strip().lower().replace(' ', '_')
+                            if col in ['name', 'customer']:
+                                args["columns"] = 'customer_name'
+                            elif col in ['price', 'total', 'amount']:
+                                args["columns"] = 'total_price'
+                            elif col in ['product']:
+                                args["columns"] = 'product_name'
+                            elif col in ['date']:
+                                args["columns"] = 'sale_date'
+                            elif col in ['email']:
+                                args["columns"] = 'customer_email'
+                            else:
+                                args["columns"] = col
+                        break
+
+            # Extract where_clause if not already extracted
+            if "where_clause" not in args:
+                import re
+
+                # Look for filtering conditions
+                where_patterns = [
+                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
+                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:below|less\s+than|under|<)\s*\$?(\d+(?:\.\d+)?)',
+                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:equal[s]?|is|=)\s*\$?(\d+(?:\.\d+)?)',
+                    r'(?:with|where)\s+quantity[_\s]*(?:>|above|greater\s+than|more\s+than)\s*(\d+)',
+                    r'(?:with|where)\s+quantity[_\s]*(?:<|below|less\s+than|under)\s*(\d+)',
+                    r'(?:with|where)\s+quantity[_\s]*(?:=|equal[s]?|is)\s*(\d+)',
+                    r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
+                    r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
+                ]
+
+                for i, pattern in enumerate(where_patterns):
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip()
+
+                        if i <= 2:  # total_price conditions
+                            if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
+                                args["where_clause"] = f"total_price > {value}"
+                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
+                                args["where_clause"] = f"total_price < {value}"
+                            else:
+                                args["where_clause"] = f"total_price = {value}"
+                        elif i <= 5:  # quantity conditions
+                            if 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
+                                args["where_clause"] = f"quantity > {value}"
+                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
+                                args["where_clause"] = f"quantity < {value}"
+                            else:
+                                args["where_clause"] = f"quantity = {value}"
+                        elif i == 6:  # customer name
+                            args["where_clause"] = f"customer_name = '{value}'"
+                        elif i == 7:  # product name
+                            args["where_clause"] = f"product_name = '{value}'"
+                        break
+
+            result["args"] = args
+
+        # Validate and clean args
+        if "args" in result and isinstance(result["args"], dict):
+            cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
+            result["args"] = cleaned_args
+
+        # Validate tool selection
+        if "tool" in result and result["tool"] not in available_tools:
+            result["tool"] = list(available_tools.keys())[0]
+
+        # Debug output
+        print(f"DEBUG: Final parsed result for '{query}': {result}")
+
+        return result
+
+    except Exception as e:
         return {
             "tool": list(available_tools.keys())[0] if available_tools else None,
             "action": "read",
@@ -884,7 +1514,7 @@ if application == "MCP Application":
     with col2:
         # Small refresh button on main page
         st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
-        if st.button("🔄 Activate Connection", key="refresh_tools_main", help="Rediscover available tools"):
+        if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
             with st.spinner("Refreshing tools..."):
                 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
                 st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
@@ -1000,19 +1630,8 @@ if application == "MCP Application":
                 st.markdown("#### Here's the current table:")
                 df = pd.DataFrame(content["result"])
                 st.table(df)
-
-                # Enhanced descriptions for new features
+                # Check if this is ETL formatted data by looking for specific formatting
                 if tool == "sales_crud" and len(df.columns) > 0:
-                    # Check for column filtering
-                    if len(df.columns) < 7:  # If fewer columns than default, column filtering was likely used
-                        st.info(
-                            f"📊 Column filtering applied - Showing {len(df.columns)} selected columns: {', '.join(df.columns)}")
-
-                    # Check for WHERE clause filtering
-                    if "where_condition" in msg.get("request", {}).get("args", {}):
-                        where_cond = msg["request"]["args"]["where_condition"]
-                        st.info(f"🔍 Data filtered with WHERE clause: {where_cond}")
-
                     # Check for different ETL formats based on column names
                     if "sale_summary" in df.columns:
                         st.info("📊 Data formatted with String Concatenation - Combined fields for readability")
@@ -1027,13 +1646,14 @@ if application == "MCP Application":
                         st.markdown(f"The table contains {len(df)} sales records with cross-database information.")
                 elif tool == "sqlserver_crud":
                     st.markdown(
-                        f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps.")
+                        f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps."
+                    )
                 elif tool == "postgresql_crud":
                     st.markdown(
-                        f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions.")
+                        f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions."
+                    )
                 else:
                     st.markdown(f"The table contains {len(df)} records.")
-
             elif action == "describe" and isinstance(content['result'], list):
                 st.markdown("#### Table Schema: ")
                 df = pd.DataFrame(content['result'])
@@ -1250,7 +1870,7 @@ if application == "MCP Application":
     """)
 
 # ========== ETL EXAMPLES HELP SECTION ==========
-with st.expander("🔧 Enhanced Features & Examples"):
+with st.expander("🔧 Enhanced Features & Working Examples"):
     st.markdown("""
     ### NEW: Column Filtering & WHERE Clause Support
 
@@ -1258,11 +1878,12 @@ with st.expander("🔧 Enhanced Features & Examples"):
     Select specific columns to display in your results:
     - **"show only product name and quantity"** - Display selected columns only
     - **"display customer names and prices"** - Filter to specific data
-    - **Available columns**: sale_id, customer_first_name, customer_last_name, product_name, product_description, quantity, unit_price, total_price, sale_date, customer_email
+    - **"show customer_first_name, total_price"** - Exact column specification
+    - **Available columns**: customer_first_name, customer_last_name, product_name, product_description, quantity, unit_price, total_price, sale_date, customer_email
 
     #### WHERE Clause Filtering
     Filter data with SQL-like conditions:
-    - **"sales where price > 14"** - Show sales with unit price above $14
+    - **"sales where price > 14"** - Show sales with total price above $14
     - **"show sales where quantity >= 2"** - Multi-item purchases only
     - **"display sales for Alice"** - Filter by customer name
     - **"sales where customer_id = 1"** - Filter by customer ID
@@ -1271,40 +1892,31 @@ with st.expander("🔧 Enhanced Features & Examples"):
     Perform operations on multiple records:
     - **"update sales where price > 14 set quantity to 5"** - Bulk update quantities
     - **"delete sales where quantity = 1"** - Remove single-item purchases
-    - **"update price to 20 where product is Widget"** - Update specific product prices
 
-    #### Combined Features
-    Use both column filtering and WHERE clauses together:
-    - **"show customer names and prices where total > 20"** - High-value sales with specific columns
-    - **"display product and quantity where customer is Alice"** - Customer-specific filtered data
-
-    ### ETL Display Formatting Functions
+    ### ETL Display Formatting Functions (Working Examples)
 
     #### 1. Data Format Conversion
-    - **Query Examples:** 
-      - "show sales with data format conversion"
-      - "convert sales data format"
-      - "format sales data for export"
+    - **"show sales with Data Format Conversion"**
+    - **"display sales using Data Format Conversion format"**
+    - **"sales data with Data Format Conversion"**
     - **What it does:** Converts dates to string format, removes unnecessary fields
 
     #### 2. Decimal Value Formatting  
-    - **Query Examples:**
-      - "format sales prices with decimal formatting" 
-      - "show sales with 2 decimal places"
-      - "decimal value formatting for sales"
+    - **"show sales with Decimal Value Formatting"**
+    - **"display sales using Decimal Value Formatting format"**
+    - **"sales with Decimal Value Formatting"**
     - **What it does:** Formats all prices to exactly 2 decimal places as strings
 
     #### 3. String Concatenation
-    - **Query Examples:**
-      - "combine sales fields for readability"
-      - "show sales with concatenated fields"
+    - **"show sales with String Concatenation"**
+    - **"display sales using String Concatenation format"**
+    - **"sales data with String Concatenation"**
     - **What it does:** Creates readable summary fields by combining related data
 
     #### 4. Null Value Removal/Handling
-    - **Query Examples:**
-      - "clean sales data with null handling"
-      - "remove nulls from sales data"
-      - "handle null values in sales"
+    - **"show sales with Null Value Removal/Handling"**
+    - **"display sales using Null Value Removal/Handling format"**
+    - **"sales with Null Value Removal/Handling"**
     - **What it does:** Filters out incomplete records and handles null values
 
     ### Regular Operations
