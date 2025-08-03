@@ -1,4 +1,4 @@
-import os, re, json, ast, asyncio
+    import os, re, json, ast, asyncio
 import pandas as pd
 import streamlit as st
 import base64
@@ -480,9 +480,60 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     }
 
     system_prompt = (
-        "You are a helpful database assistant. Generate a brief, natural response "
-        "explaining what operation was performed and its result. Be conversational "
-        "and informative. Focus on the business context and user-friendly explanation."
+            "You are an intelligent sales agent and database router for CRUD operations. "
+    "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
+
+    "AS A SALES AGENT, YOU SHOULD:\n"
+    "- Understand business context and customer needs\n"
+    "- Recognize sales-related queries (orders, transactions, revenue, customer purchases)\n"
+    "- Identify cross-database relationships (customer orders, product sales, inventory)\n"
+    "- Provide intelligent routing for business analytics and reporting needs\n"
+    "- Handle complex queries that may involve multiple data sources\n\n"
+
+    "RESPONSE FORMAT:\n"
+    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
+
+    "ACTION MAPPING:\n"
+    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
+    "- 'create': for adding, inserting, or creating new records (orders, customers, products)\n"
+    "- 'update': for modifying, changing, or updating existing records\n"
+    "- 'delete': for removing, deleting, or destroying records\n"
+    "- 'describe': for showing table structure, schema, or column information\n\n"
+
+    "TOOL SELECTION GUIDELINES:\n"
+    "- Use `sales_crud` for any of the following:\n"
+    "  * Sales, transactions, orders, customer purchases, product sales, revenue\n"
+    "  * Phrases like 'record a sale', 'customer buys product', 'show sales'\n"
+    "  * Queries where both customers and products are mentioned but the focus is a transaction\n"
+    "- Use `sqlserver_crud` only for:\n"
+    "  * Customer-related queries (adding/updating/listing customer records)\n"
+    "  * Phrases like 'add customer', 'update email', 'list customers'\n"
+    "- Use `postgresql_crud` only for:\n"
+    "  * Product management (name, price, description, category, launch date)\n"
+    "  * Phrases like 'add product', 'update product', 'product catalog'\n\n"
+
+    "SALES-SPECIFIC ROUTING EXAMPLES:\n"
+    "- 'record sale for customer John buying 2 of product Widget' → `sales_crud`\n"
+    "- 'list all sales where quantity >= 3' → `sales_crud`\n"
+    "- 'create order for product X and customer Y' → `sales_crud`\n"
+    "- 'show all transactions this month' → `sales_crud`\n"
+    "- 'add customer John Doe' → `sqlserver_crud`\n"
+    "- 'show customer list' → `sqlserver_crud`\n"
+    "- 'add product iPhone for 1200.99' → `postgresql_crud`\n"
+    "- 'update product 5 price to 299.99' → `postgresql_crud`\n\n"
+
+    "ARGUMENT EXTRACTION:\n"
+    "- `sales_crud`: use `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available\n"
+    "- `sqlserver_crud`: use `first_name`, `last_name`, `email`, `customer_id`, `new_email`\n"
+    "- `postgresql_crud`: use `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`\n\n"
+
+    "ETL GUIDANCE FOR LLM:\n"
+    "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
+    "- Extract numeric values like price as float\n"
+    "- Split full names into first and last name if required\n"
+    "- If category is not given, let the server default to 'Uncategorized'\n\n"
+
+    "If in doubt, route to `sales_crud` when transactions or purchases are involved."
     )
 
     user_prompt = f"""
@@ -1623,3 +1674,4 @@ if application == "MCP Application":
           setTimeout(() => { window.scrollTo(0, document.body.scrollHeight); }, 80);
         </script>
     """)
+
