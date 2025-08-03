@@ -373,6 +373,7 @@ def get_image_base64(img_path):
     img_base64 = base64.b64encode(img_bytes).decode()
     return img_base64
 
+logo_path = "Picture1.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
@@ -383,7 +384,6 @@ if logo_base64:
         """,
         unsafe_allow_html=True
     )
-logo_path = "Picture1.png"
 col1, col2, col3 = st.columns([1, 4, 1])
 with col2:
     st.image(logo_path, width=180)
