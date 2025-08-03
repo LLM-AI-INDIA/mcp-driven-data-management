@@ -481,7 +481,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     }
 
     system_prompt = (
-    "You are an intelligent sales agent and database router for CRUD operations. "
+   "You are an intelligent sales agent and database router for CRUD operations. "
     "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
 
     "AS A SALES AGENT, YOU SHOULD:\n"
@@ -527,9 +527,9 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     "- 'list customers whose name is John' → `sqlserver_crud`\n\n"
 
     "ARGUMENT EXTRACTION:\n"
-    "- `sales_crud`: use `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available; also supports `columns`, `where_clause` with logic like 'customer = \"Alice\"', 'quantity >= 3'\n"
-    "- `sqlserver_crud`: use `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause` with filters like 'name = \"John\"'\n"
-    "- `postgresql_crud`: use `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause` like 'price = 1000'\n\n"
+    "- `sales_crud`: supports `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available. Also supports `columns`, `where_clause`, `limit`\n"
+    "- `sqlserver_crud`: supports `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`, `limit`\n"
+    "- `postgresql_crud`: supports `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`, `limit`\n\n"
 
     "ETL GUIDANCE FOR LLM:\n"
     "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
@@ -1678,6 +1678,7 @@ if application == "MCP Application":
           setTimeout(() => { window.scrollTo(0, document.body.scrollHeight); }, 80);
         </script>
     """)
+
 
 
 
