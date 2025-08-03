@@ -524,8 +524,9 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
     "ARGUMENT EXTRACTION:\n"
     "- `sales_crud`: use `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available\n"
-    "- `sqlserver_crud`: use `first_name`, `last_name`, `email`, `customer_id`, `new_email`\n"
-    "- `postgresql_crud`: use `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`\n\n"
+    "- `sqlserver_crud`: use `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`\n"
+    "- `postgresql_crud`: use `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`\n\n"
+
 
     "ETL GUIDANCE FOR LLM:\n"
     "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
@@ -1674,4 +1675,5 @@ if application == "MCP Application":
           setTimeout(() => { window.scrollTo(0, document.body.scrollHeight); }, 80);
         </script>
     """)
+
 
