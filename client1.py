@@ -362,7 +362,7 @@ with st.sidebar:
     st.markdown(
     f"""
     <div class="sidebar-logo-row">
-        <img src="data:image/png;base64,{logo_base64}" title="Logo" style="width: 50px; height: 50px;">
+        <img src="https://images.app.goo.gl/sTJVB8dE8Dp6qDwj6" title="Logo" style="width: 50px; height: 50px;">
         <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud" style="width: 50px; height: 50px;">
         <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS" style="width: 50px; height: 50px;">
         <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud" style="width: 50px; height: 50px;">
