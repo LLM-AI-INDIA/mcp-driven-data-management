@@ -22,7 +22,7 @@ if not GROQ_API_KEY:
 
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "llama3-70b-8192")
+    model_name=os.environ.get("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
 )
 
 # ========== PAGE CONFIG ==========
@@ -294,7 +294,6 @@ def generate_tool_descriptions(tools_dict: dict) -> str:
 
     return "\n".join(descriptions)
 
-
 def get_image_base64(img_path):
     img = Image.open(img_path)
     buffered = BytesIO()
@@ -302,7 +301,6 @@ def get_image_base64(img_path):
     img_bytes = buffered.getvalue()
     img_base64 = base64.b64encode(img_bytes).decode()
     return img_base64
-
 
 # ========== SIDEBAR NAVIGATION ==========
 with st.sidebar:
@@ -360,30 +358,35 @@ with st.sidebar:
         st.button("Clear/Reset", key="clear_button")
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
+    logo_base64 = get_image_base64("Logo.png")
     st.markdown(
-        """
-        <div class="sidebar-logo-row">
-            <img src = "data:image/jpeg;base64,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" title="no">
-            <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud">
-            <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud">
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ========== LOGO/HEADER FOR MAIN AREA ==========
-# Updated to use GitHub URL directly
-logo_url = "https://github.com/lokit-s/mcp/blob/main/Picture1.png?raw=true"
-st.markdown(
     f"""
-    <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
-        <img src='{logo_url}' width='220'>
+    <div class="sidebar-logo-row">
+        <img src="data:image/png;base64,{logo_base64}" title="Logo" style="width: 50px; height: 50px;">
+        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud" style="width: 50px; height: 50px;">
+        <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS" style="width: 50px; height: 50px;">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud" style="width: 50px; height: 50px;">
     </div>
     """,
     unsafe_allow_html=True
 )
+
+
+# ========== LOGO/HEADER FOR MAIN AREA ==========
+
+
+
+logo_path = "Picture1.png"
+logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
+if logo_base64:
+    st.markdown(
+        f"""
+        <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
+            <img src='data:image/png;base64,{logo_base64}' width='220'>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 st.markdown(
     """
@@ -544,91 +547,10 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     }
 
     system_prompt = (
-    "You are an intelligent sales agent and database router for CRUD operations. \n"
-    "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
-
-    "AS A SALES AGENT, YOU SHOULD:\n"
-    "- Understand business context and customer needs\n"
-    "- Recognize sales-related queries (orders, transactions, revenue, customer purchases)\n"
-    "- Identify cross-database relationships (customer orders, product sales, inventory)\n"
-    "- Provide intelligent routing for business analytics and reporting needs\n"
-    "- Handle complex queries that may involve multiple data sources\n\n"
-
-    "RESPONSE FORMAT:\n"
-    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
-
-    "ACTION MAPPING:\n"
-    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-    "- 'create': for adding, inserting, or creating new records (orders, customers, products)\n"
-    "- 'update': for modifying, changing, or updating existing records\n"
-    "- 'delete': for removing, deleting, or destroying records\n"
-    "- 'describe': for showing table structure, schema, or column information\n\n"
-
-    "TOOL SELECTION GUIDELINES:\n"
-    "- Use `sales_crud` for any of the following:\n"
-    "  * Sales, transactions, orders, customer purchases, product sales, revenue\n"
-    "  * Phrases like 'record a sale', 'customer buys product', 'show sales', 'show sales of Alice and Bob'\n"
-    "  * Queries where both customers and products are mentioned but the focus is a transaction\n"
-    "  * Queries that involve excluding or including columns related to customer or product within a sales context\n"
-    "- Use `sqlserver_crud` only for:\n"
-    "  * Customer-related queries (adding/updating/listing customer records)\n"
-    "  * Phrases like 'add customer', 'update email', 'list customers', 'find customers with name John'\n"
-    "- Use `postgresql_crud` only for:\n"
-    "  * Product management (name, price, description, category, launch date)\n"
-    "  * Phrases like 'add product', 'update product', 'product catalog', 'list product where price is 1000'\n\n"
-
-    "SALES-SPECIFIC ROUTING EXAMPLES:\n"
-    "- 'record sale for customer John buying 2 of product Widget' → `sales_crud`\n"
-    "- 'list all sales where quantity >= 3' → `sales_crud`\n"
-    "- 'create order for product X and customer Y' → `sales_crud`\n"
-    "- 'show all transactions this month' → `sales_crud`\n"
-    "- 'show sales of Alice and Bob' → `sales_crud`\n"
-    "- 'show sales without customer name and product name' → `sales_crud`\n"
-    "- 'add customer John Doe' → `sqlserver_crud`\n"
-    "- 'show customer list' → `sqlserver_crud`\n"
-    "- 'add product iPhone for 1200.99' → `postgresql_crud`\n"
-    "- 'update product 5 price to 299.99' → `postgresql_crud`\n"
-    "- 'list product where price > 1000' → `postgresql_crud`\n"
-    "- 'list customers whose name is John' → `sqlserver_crud`\n\n"
-
-    "ARGUMENT EXTRACTION:\n"
-    "- `sales_crud`: supports `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available. Also supports `columns`, `where_clause`, `limit`\n"
-    "  * When columns include exclusions like `*,-customer_name,-product_name`, this is still a sales query and must route to `sales_crud`\n"
-    "- `sqlserver_crud`: supports `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`, `limit`\n"
-    "- `postgresql_crud`: supports `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`, `limit`\n\n"
-
-    "ETL GUIDANCE FOR LLM:\n"
-    "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
-    "- Extract numeric values like price as float\n"
-    "- Split full names into first and last name if required\n"
-    "- If category is not given, let the server default to 'Uncategorized'\n\n"
-
-    "If in doubt, route to `sales_crud` when transactions or purchases are involved.\n\n"
-
-    "LLM EXAMPLES FOR REFERENCE:\n"
-
-    "Query: 'Record sale: Alice buys 3 of Laptop'\n"
-    "→ { \"tool\": \"sales_crud\", \"action\": \"create\", \"args\": { \"customer_name\": \"Alice\", \"product_name\": \"Laptop\", \"quantity\": 3 } }\n\n"
-    "Query: 'List sales where quantity >= 5'\n"
-    "→ { \"tool\": \"sales_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"quantity >= 5\" } }\n\n"
-    "Query: 'List sales without customer name and product name'\n"
-    "→ { \"tool\": \"sales_crud\", \"action\": \"read\", \"args\": { \"columns\": \"*,-customer_name,-product_name\" } }\n\n"
-    "Query: 'Show sales of Alice and Bob'\n"
-    "→ { \"tool\": \"sales_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"customer in ['Alice', 'Bob']\" } }\n\n"
-    "Query: 'Update sale 12 quantity to 7'\n"
-    "→ { \"tool\": \"sales_crud\", \"action\": \"update\", \"args\": { \"sale_id\": 12, \"new_quantity\": 7 } }\n\n"
-
-    "Query: 'Add customer John Doe with email john@example.com'\n"
-    "→ { \"tool\": \"sqlserver_crud\", \"action\": \"create\", \"args\": { \"first_name\": \"John\", \"last_name\": \"Doe\", \"email\": \"john@example.com\" } }\n\n"
-    "Query: 'List customers named Alice'\n"
-    "→ { \"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"name = 'Alice'\" } }\n\n"
-    "Query: 'List customers whose name contains Smith'\n"
-    "→ { \"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"name like 'Smith'\" } }\n\n"
-    "Query: 'Add product iPhone 15 for $999.99'\n"
-    "→ { \"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": { \"name\": \"iPhone 15\", \"price\": 999.99 } }\n\n"
-    "Query: 'List products priced over $1000'\n"
-    "→ { \"tool\": \"postgresql_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"price > 1000\" } }\n"
-)
+        "You are a helpful database assistant. Generate a brief, natural response "
+        "explaining what operation was performed and its result. Be conversational "
+        "and informative. Focus on the business context and user-friendly explanation."
+    )
 
     user_prompt = f"""
     Based on this database operation context, generate a brief natural response:
@@ -665,311 +587,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with display format detection"""
-
-    if not available_tools:
-        return {"error": "No tools available"}
-
-    # Build comprehensive tool information for the LLM
-    tool_info = []
-    for tool_name, tool_desc in available_tools.items():
-        tool_info.append(f"- **{tool_name}**: {tool_desc}")
-
-    tools_description = "\n".join(tool_info)
-
-    system_prompt = (
-        "You are an intelligent database router for CRUD operations. "
-        "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
-
-        "RESPONSE FORMAT:\n"
-        "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
-
-        "ACTION MAPPING:\n"
-        "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-        "- 'create': for adding, inserting, or creating NEW records\n"
-        "- 'update': for modifying, changing, or updating existing records\n"
-        "- 'delete': for removing, deleting, or destroying records\n"
-        "- 'describe': for showing table structure, schema, or column information\n\n"
-
-        "CRITICAL TOOL SELECTION RULES:\n"
-        "\n"
-        "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
-        "   - 'list products', 'show products', 'display products'\n"
-        "   - 'product inventory', 'product catalog', 'product information'\n"
-        "   - 'add product', 'create product', 'new product'\n"
-        "   - 'update product', 'change product price', 'modify product'\n"
-        "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
-        "   - Any query primarily about products, pricing, or inventory\n"
-        "\n"
-        "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
-        "   - 'list customers', 'show customers', 'display customers'\n"
-        "   - 'customer information', 'customer details'\n"
-        "   - 'add customer', 'create customer', 'new customer'\n"
-        "   - 'update customer', 'change customer email', 'modify customer'\n"
-        "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
-        "   - Any query primarily about customers, names, or emails\n"
-        "\n"
-        "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
-        "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
-        "   - 'sales report', 'revenue data', 'purchase history'\n"
-        "   - 'who bought what', 'customer purchases'\n"
-        "   - Cross-database queries combining customer + product + sales info\n"
-        "   - 'create sale', 'add sale', 'new transaction'\n"
-        "   - Any query asking for combined data from multiple tables\n"
-        "   - ETL formatting queries with display_format parameter\n"
-        "\n"
-        "ENHANCED DISPLAY FORMAT DETECTION (CRITICAL FOR SALES_CRUD):\n"
-        "\n"
-        "For sales_crud queries, detect display_format from these EXACT patterns:\n"
-        "\n"
-        "DATA FORMAT CONVERSION PATTERNS:\n"
-        "- 'with Data Format Conversion' → {\"display_format\": \"Data Format Conversion\"}\n"
-        "- 'using Data Format Conversion format' → {\"display_format\": \"Data Format Conversion\"}\n"
-        "- 'Data Format Conversion' (exact match) → {\"display_format\": \"Data Format Conversion\"}\n"
-        "\n"
-        "DECIMAL VALUE FORMATTING PATTERNS:\n"
-        "- 'with Decimal Value Formatting' → {\"display_format\": \"Decimal Value Formatting\"}\n"
-        "- 'using Decimal Value Formatting format' → {\"display_format\": \"Decimal Value Formatting\"}\n"
-        "- 'Decimal Value Formatting' (exact match) → {\"display_format\": \"Decimal Value Formatting\"}\n"
-        "\n"
-        "STRING CONCATENATION PATTERNS:\n"
-        "- 'with String Concatenation' → {\"display_format\": \"String Concatenation\"}\n"
-        "- 'using String Concatenation format' → {\"display_format\": \"String Concatenation\"}\n"
-        "- 'String Concatenation' (exact match) → {\"display_format\": \"String Concatenation\"}\n"
-        "\n"
-        "NULL VALUE REMOVAL/HANDLING PATTERNS:\n"
-        "- 'with Null Value Removal/Handling' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
-        "- 'using Null Value Removal/Handling format' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
-        "- 'Null Value Removal/Handling' (exact match) → {\"display_format\": \"Null Value Removal/Handling\"}\n"
-        "- 'null handling' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
-        "- 'clean sales data with null handling' → {\"display_format\": \"Null Value Removal/Handling\"}\n"
-        "\n"
-        "EXAMPLES OF DISPLAY FORMAT EXTRACTION:\n"
-        "\n"
-        "Query: 'show sales with Data Format Conversion'\n"
-        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
-        "\n"
-        "Query: 'display sales using Decimal Value Formatting format'\n"
-        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
-        "\n"
-        "Query: 'sales with String Concatenation'\n"
-        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
-        "\n"
-        "Query: 'clean sales data with null handling'\n"
-        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
-        "\n"
-        "ENHANCED DELETE OPERATION EXTRACTION:\n"
-        "\n"
-        "For DELETE operations, extract the entity name from these patterns:\n"
-        "\n"
-        "PRODUCT DELETE PATTERNS:\n"
-        "- 'delete [ProductName]' → {\"name\": \"ProductName\"}\n"
-        "- 'delete product [ProductName]' → {\"name\": \"ProductName\"}\n"
-        "- 'remove [ProductName]' → {\"name\": \"ProductName\"}\n"
-        "- 'remove product [ProductName]' → {\"name\": \"ProductName\"}\n"
-        "\n"
-        "CUSTOMER DELETE PATTERNS:\n"
-        "- 'delete [CustomerName]' → {\"name\": \"CustomerName\"}\n"
-        "- 'delete customer [CustomerName]' → {\"name\": \"CustomerName\"}\n"
-        "- 'remove [CustomerName]' → {\"name\": \"CustomerName\"}\n"
-        "- 'remove customer [CustomerName]' → {\"name\": \"CustomerName\"}\n"
-        "\n"
-        "ENHANCED UPDATE OPERATION EXTRACTION:\n"
-        "\n"
-        "For UPDATE operations, extract both the entity name and new value:\n"
-        "\n"
-        "PRODUCT UPDATE PATTERNS:\n"
-        "- 'update price of [ProductName] to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
-        "- 'change price of [ProductName] to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
-        "- 'set [ProductName] price to [NewPrice]' → {\"name\": \"ProductName\", \"new_price\": NewPrice}\n"
-        "\n"
-        "CUSTOMER UPDATE PATTERNS:\n"
-        "- 'update email of [CustomerName] to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
-        "- 'change email of [CustomerName] to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
-        "- 'set [CustomerName] email to [NewEmail]' → {\"name\": \"CustomerName\", \"new_email\": \"NewEmail\"}\n"
-        "\n"
-        "ENHANCED COLUMN SELECTION EXTRACTION:\n"
-        "\n"
-        "For queries that request specific columns, extract them into the 'columns' parameter:\n"
-        "\n"
-        "COLUMN EXTRACTION PATTERNS:\n"
-        "- 'show customer_first_name, total_price' → {\"columns\": \"customer_first_name,total_price\"}\n"
-        "- 'display customer_first_name and total_price' → {\"columns\": \"customer_first_name,total_price\"}\n"
-        "- 'show only customer and price' → {\"columns\": \"customer_first_name,total_price\"}\n"
-        "\n"
-        "ENHANCED WHERE CLAUSE EXTRACTION:\n"
-        "\n"
-        "Extract filtering conditions from natural language and add them to 'where_condition' parameter:\n"
-        "\n"
-        "WHERE CLAUSE PATTERNS:\n"
-        "- 'sales where price > 14' → {\"where_condition\": \"s.total_price > 14\"}\n"
-        "- 'sales where quantity >= 2' → {\"where_condition\": \"s.quantity >= 2\"}\n"
-        "- 'sales for customer Alice' → {\"where_condition\": \"c.FirstName = 'Alice'\"}\n"
-        "\n"
-
-        f"AVAILABLE TOOLS:\n{tools_description}\n\n"
-
-        "CRITICAL: Always analyze the PRIMARY INTENT of the query:\n"
-        "- If asking about PRODUCTS specifically → postgresql_crud\n"
-        "- If asking about CUSTOMERS specifically → sqlserver_crud\n"
-        "- If asking about SALES/TRANSACTIONS or ETL formatting → sales_crud\n"
-        "\n"
-        "FOR DISPLAY FORMAT DETECTION:\n"
-        "1. Look for exact ETL format names in the query\n"
-        "2. Match patterns like 'with [FormatName]', 'using [FormatName] format'\n"
-        "3. Add to display_format parameter with exact string match\n"
-        "4. Only apply to sales_crud queries\n"
-    )
-
-    user_prompt = f"""User query: "{query}"
-
-Analyze the query step by step:
-
-1. What is the PRIMARY INTENT? (product, customer, or sales operation)
-2. What ACTION is being requested? (create, read, update, delete, describe)
-3. What DISPLAY FORMAT is requested? (for sales queries - extract exact format name)
-4. What ENTITY NAME needs to be extracted? (for delete/update operations)
-5. What SPECIFIC COLUMNS are requested? (for read operations)
-6. What FILTER CONDITIONS are specified? (for read operations)
-
-DISPLAY FORMAT DETECTION (CRITICAL):
-- Look for exact format names: "Data Format Conversion", "Decimal Value Formatting", "String Concatenation", "Null Value Removal/Handling"
-- Match patterns: "with [FormatName]", "using [FormatName] format", "[FormatName]"
-- For null handling: also match "null handling", "clean data with null"
-
-Respond with the exact JSON format with properly extracted parameters."""
-
-    try:
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
-        resp = groq_client.invoke(messages)
-
-        raw = _clean_json(resp.content)
-
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            try:
-                result = ast.literal_eval(raw)
-            except:
-                result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
-
-        # Normalize action names
-        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
-            result["action"] = "read"
-
-        # Enhanced parameter extraction for read operations with display_format detection
-        if result.get("action") == "read" and result.get("tool") == "sales_crud":
-            args = result.get("args", {})
-
-            # Extract display_format if not already extracted
-            if "display_format" not in args:
-                import re
-
-                # Look for exact display format patterns
-                display_format_patterns = [
-                    (r'Data Format Conversion', 'Data Format Conversion'),
-                    (r'Decimal Value Formatting', 'Decimal Value Formatting'),
-                    (r'String Concatenation', 'String Concatenation'),
-                    (r'Null Value Removal/Handling', 'Null Value Removal/Handling'),
-                    (r'null handling', 'Null Value Removal/Handling'),
-                    (r'clean.*?null.*?handling', 'Null Value Removal/Handling'),
-                    (r'handle.*?null.*?values', 'Null Value Removal/Handling'),
-                ]
-
-                for pattern, format_name in display_format_patterns:
-                    if re.search(pattern, query, re.IGNORECASE):
-                        args["display_format"] = format_name
-                        print(f"DEBUG: Extracted display_format '{format_name}' from query '{query}'")
-                        break
-
-            # Extract columns if not already extracted
-            if "columns" not in args:
-                import re
-
-                # Look for column specification patterns
-                column_patterns = [
-                    r'(?:show|display|get|select)\s+only\s+(.+?)(?:\s+from|\s+where|\s*$)',
-                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
-                ]
-
-                for pattern in column_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        columns_text = match.group(1).strip()
-
-                        # Clean up and standardize column names
-                        if 'and' in columns_text or ',' in columns_text:
-                            # Multiple columns
-                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
-                            cleaned_columns = []
-
-                            for col in columns_list:
-                                col = col.strip().lower().replace(' ', '_')
-                                # Map common variations
-                                if col in ['name', 'customer']:
-                                    cleaned_columns.append('customer_first_name')
-                                elif col in ['price', 'total', 'amount']:
-                                    cleaned_columns.append('total_price')
-                                elif col in ['product']:
-                                    cleaned_columns.append('product_name')
-                                elif col in ['date']:
-                                    cleaned_columns.append('sale_date')
-                                elif col in ['email']:
-                                    cleaned_columns.append('customer_email')
-                                else:
-                                    cleaned_columns.append(col)
-
-                            if cleaned_columns:
-                                args["columns"] = ','.join(cleaned_columns)
-                        break
-
-            # Extract where_condition if not already extracted
-            if "where_condition" not in args:
-                import re
-
-                # Look for filtering conditions
-                where_patterns = [
-                    (r'where\s+price\s*>\s*(\d+)', lambda m: f"s.total_price > {m.group(1)}"),
-                    (r'where\s+quantity\s*>=?\s*(\d+)', lambda m: f"s.quantity >= {m.group(1)}"),
-                    (r'for\s+customer\s+([A-Za-z\s]+)', lambda m: f"c.FirstName = '{m.group(1).strip()}'"),
-                ]
-
-                for pattern, formatter in where_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        args["where_condition"] = formatter(match)
-                        print(f"DEBUG: Extracted where_condition '{args['where_condition']}' from query '{query}'")
-                        break
-
-            result["args"] = args
-
-        # Keep all your existing parameter extraction logic for other operations...
-        # [Rest of your existing code for delete, update, create operations]
-
-        # Validate and clean args
-        if "args" in result and isinstance(result["args"], dict):
-            cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
-            result["args"] = cleaned_args
-
-        # Validate tool selection
-        if "tool" in result and result["tool"] not in available_tools:
-            result["tool"] = list(available_tools.keys())[0]
-
-        # Debug output
-        print(f"DEBUG: Final parsed result for '{query}': {result}")
-
-        return result
-
-    except Exception as e:
-        return {
-            "tool": list(available_tools.keys())[0] if available_tools else None,
-            "action": "read",
-            "args": {},
-            "error": f"Failed to parse query: {str(e)}"
-        }
+    """Enhanced parse user query with better DELETE operation handling"""
 
     if not available_tools:
         return {"error": "No tools available"}
@@ -1021,6 +639,34 @@ Respond with the exact JSON format with properly extracted parameters."""
         "   - 'create sale', 'add sale', 'new transaction'\n"
         "   - Any query asking for combined data from multiple tables\n"
         "\n"
+
+        "**ETL & DISPLAY FORMATTING RULES:**\n"
+    "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
+    "you MUST use the `display_format` parameter within the `sales_crud` tool.\n"
+
+    "1. **DECIMAL FORMATTING:**\n"
+    "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
+    "   - Use: `{\"display_format\": \"Decimal Value Formatting\"}`\n"
+    "   - **Example Query:** 'show sales with 2 decimal places'\n"
+    "   - **→ Correct Tool Call:** `{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}`\n"
+
+    "2. **DATE FORMATTING:**\n"
+    "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
+    "   - Use: `{\"display_format\": \"Data Format Conversion\"}`\n"
+    "   - **Example Query:** 'show sales with formatted dates'\n"
+    "   - **→ Correct Tool Call:** `{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}`\n"
+
+    "3. **NULL VALUE HANDLING:**\n"
+    "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
+    "   - Use: `{\"display_format\": \"Null Value Removal/Handling\"}`\n"
+    "   - **Example Query:** 'show sales but remove records with missing info'\n"
+    "   - **→ Correct Tool Call:** `{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}`\n"
+
+    "4. **STRING CONCATENATION:**\n"
+    "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
+    "   - Use: `{\"display_format\": \"String Concatenation\"}`\n"
+    "   - **Example Query:** 'show sales with customer full names'\n"
+    "   - **→ Correct Tool Call:** `{\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}`\n"
         "ENHANCED DELETE OPERATION EXTRACTION:\n"
         "\n"
         "For DELETE operations, extract the entity name from these patterns:\n"
@@ -1204,27 +850,27 @@ Respond with the exact JSON format with properly extracted parameters."""
         # ENHANCED parameter extraction for DELETE and UPDATE operations
         if result.get("action") in ["delete", "update"]:
             args = result.get("args", {})
-
+            
             # Extract entity name for delete/update operations if not already extracted
             if "name" not in args:
                 import re
-
+                
                 # Enhanced regex patterns for delete operations
                 delete_patterns = [
                     r'(?:delete|remove)\s+(?:product\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
                     r'(?:delete|remove)\s+(?:customer\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
                     r'(?:delete|remove)\s+([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)'
                 ]
-
+                
                 # Enhanced regex patterns for update operations
                 update_patterns = [
                     r'(?:update|change|set)\s+(?:price\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
                     r'(?:update|change|set)\s+(?:email\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
                     r'(?:update|change|set)\s+([A-Za-z][A-Za-z0-9\s]*?)\s+(?:price|email)\s+(?:to|=)',
                 ]
-
+                
                 all_patterns = delete_patterns + update_patterns
-
+                
                 for pattern in all_patterns:
                     match = re.search(pattern, query, re.IGNORECASE)
                     if match:
@@ -1236,7 +882,7 @@ Respond with the exact JSON format with properly extracted parameters."""
                             args["name"] = ' '.join(name_words)
                             print(f"DEBUG: Extracted name '{args['name']}' from query '{query}'")
                             break
-
+            
             # Extract new_price for product updates
             if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
                 import re
@@ -1244,7 +890,7 @@ Respond with the exact JSON format with properly extracted parameters."""
                 if price_match:
                     args["new_price"] = float(price_match.group(1))
                     print(f"DEBUG: Extracted new_price '{args['new_price']}' from query '{query}'")
-
+            
             # Extract new_email for customer updates
             if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
                 import re
@@ -1252,74 +898,71 @@ Respond with the exact JSON format with properly extracted parameters."""
                 if email_match:
                     args["new_email"] = email_match.group(1)
                     print(f"DEBUG: Extracted new_email '{args['new_email']}' from query '{query}'")
-
+            
             result["args"] = args
 
         # Enhanced parameter extraction for create operations
         elif result.get("action") == "create":
             args = result.get("args", {})
-
+            
             # Extract name and email from query if not already extracted
             if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
                 # Try to extract name and email using regex patterns
                 import re
-
+                
                 # Extract email
                 email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
                 if email_match and "email" not in args:
                     args["email"] = email_match.group(0)
-
+                
                 # Extract name (everything between 'customer' and 'with' or before email)
                 if "name" not in args:
                     # Pattern 1: "create customer [Name] with [email]"
-                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query,
-                                           re.IGNORECASE)
+                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
                     if not name_match:
                         # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
-                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query,
-                                               re.IGNORECASE)
+                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
                     if not name_match:
                         # Pattern 3: Extract everything before the email
                         if email_match:
                             name_part = query[:email_match.start()].strip()
                             name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
-
+                    
                     if name_match:
                         extracted_name = name_match.group(1).strip()
                         # Clean up common words
-                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name,
-                                                flags=re.IGNORECASE).strip()
+                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name, flags=re.IGNORECASE).strip()
                         if extracted_name:
                             args["name"] = extracted_name
-
+            
             result["args"] = args
 
         # Enhanced parameter extraction for read operations with columns and where_clause
         elif result.get("action") == "read" and result.get("tool") == "sales_crud":
             args = result.get("args", {})
-
+            
             # Extract columns if not already extracted
             if "columns" not in args:
                 import re
-
+                
                 # Look for column specification patterns
                 column_patterns = [
                     r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
                     r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
                     r'display\s+(.+?)(?:\s+from|\s*$)',
                 ]
-
+                
                 for pattern in column_patterns:
                     match = re.search(pattern, query, re.IGNORECASE)
                     if match:
                         columns_text = match.group(1).strip()
-
+                        
                         # Clean up and standardize column names
                         if 'and' in columns_text or ',' in columns_text:
                             # Multiple columns
                             columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
                             cleaned_columns = []
-
+                            
                             for col in columns_list:
                                 col = col.strip().lower().replace(' ', '_')
                                 # Map common variations
@@ -1335,7 +978,7 @@ Respond with the exact JSON format with properly extracted parameters."""
                                     cleaned_columns.append('customer_email')
                                 else:
                                     cleaned_columns.append(col)
-
+                            
                             if cleaned_columns:
                                 args["columns"] = ','.join(cleaned_columns)
                         else:
@@ -1354,11 +997,11 @@ Respond with the exact JSON format with properly extracted parameters."""
                             else:
                                 args["columns"] = col
                         break
-
+            
             # Extract where_clause if not already extracted
             if "where_clause" not in args:
                 import re
-
+                
                 # Look for filtering conditions
                 where_patterns = [
                     r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
@@ -1370,12 +1013,12 @@ Respond with the exact JSON format with properly extracted parameters."""
                     r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
                     r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
                 ]
-
+                
                 for i, pattern in enumerate(where_patterns):
                     match = re.search(pattern, query, re.IGNORECASE)
                     if match:
                         value = match.group(1).strip()
-
+                        
                         if i <= 2:  # total_price conditions
                             if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
                                 args["where_clause"] = f"total_price > {value}"
@@ -1395,7 +1038,7 @@ Respond with the exact JSON format with properly extracted parameters."""
                         elif i == 7:  # product name
                             args["where_clause"] = f"product_name = '{value}'"
                         break
-
+            
             result["args"] = args
 
         # Validate and clean args
@@ -1479,7 +1122,7 @@ def extract_name_from_query(text: str) -> str:
         r'delete\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
         r'remove\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)'
     ]
-
+    
     # Patterns for product operations
     product_patterns = [
         r'delete\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
@@ -1488,14 +1131,14 @@ def extract_name_from_query(text: str) -> str:
         r'change\s+price\s+of\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
         r'(?:price\s+of\s+)([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(?:to|=)'
     ]
-
+    
     all_patterns = customer_patterns + product_patterns
-
+    
     for pattern in all_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return match.group(1).strip()
-
+    
     return None
 
 
@@ -1512,12 +1155,12 @@ def extract_price(text):
         r'\$(\d+(?:\.\d+)?)',
         r'(\d+(?:\.\d+)?)\s*dollars?'
     ]
-
+    
     for pattern in price_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             return float(match.group(1))
-
+    
     return None
 
 
@@ -1824,7 +1467,7 @@ if application == "MCP Application":
             p["args"] = args
 
             # ========== ENHANCED NAME-BASED RESOLUTION ==========
-
+            
             # For SQL Server (customers) operations
             if tool == "sqlserver_crud":
                 if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
@@ -1841,10 +1484,10 @@ if application == "MCP Application":
                                 args["customer_id"] = exact_matches[0]["Id"]
                             else:
                                 # Try partial matches (first name or last name)
-                                partial_matches = [c for c in customers if
-                                                   name_to_find.lower() in c.get("Name", "").lower() or
-                                                   name_to_find.lower() in c.get("FirstName", "").lower() or
-                                                   name_to_find.lower() in c.get("LastName", "").lower()]
+                                partial_matches = [c for c in customers if 
+                                    name_to_find.lower() in c.get("Name", "").lower() or
+                                    name_to_find.lower() in c.get("FirstName", "").lower() or 
+                                    name_to_find.lower() in c.get("LastName", "").lower()]
                                 if partial_matches:
                                     args["customer_id"] = partial_matches[0]["Id"]
                                 else:
@@ -1861,7 +1504,7 @@ if application == "MCP Application":
                     if possible_email:
                         args["new_email"] = possible_email
 
-            # For PostgreSQL (products) operations
+            # For PostgreSQL (products) operations  
             elif tool == "postgresql_crud":
                 if action in ["update", "delete"] and "name" in args and "product_id" not in args:
                     # First, try to find the product by name
@@ -1877,8 +1520,7 @@ if application == "MCP Application":
                                 args["product_id"] = exact_matches[0]["id"]
                             else:
                                 # Try partial matches
-                                partial_matches = [p for p in products if
-                                                   name_to_find.lower() in p.get("name", "").lower()]
+                                partial_matches = [p for p in products if name_to_find.lower() in p.get("name", "").lower()]
                                 if partial_matches:
                                     args["product_id"] = partial_matches[0]["id"]
                                 else:
@@ -1952,61 +1594,45 @@ if application == "MCP Application":
     """)
 
 # ========== ETL EXAMPLES HELP SECTION ==========
-with st.expander("🔧 Enhanced Features & Working Examples"):
+with st.expander("🔧 ETL Functions & Examples"):
     st.markdown("""
-    ### NEW: Column Filtering & WHERE Clause Support
+    ### ETL Display Formatting Functions
 
-    #### Column Filtering
-    Select specific columns to display in your results:
-    - **"show only product name and quantity"** - Display selected columns only
-    - **"display customer names and prices"** - Filter to specific data
-    - **"show customer_first_name, total_price"** - Exact column specification
-    - **Available columns**: customer_first_name, customer_last_name, product_name, product_description, quantity, unit_price, total_price, sale_date, customer_email
-
-    #### WHERE Clause Filtering
-    Filter data with SQL-like conditions:
-    - **"sales where price > 14"** - Show sales with total price above $14
-    - **"show sales where quantity >= 2"** - Multi-item purchases only
-    - **"display sales for Alice"** - Filter by customer name
-    - **"sales where customer_id = 1"** - Filter by customer ID
-
-    #### Bulk Operations with WHERE
-    Perform operations on multiple records:
-    - **"update sales where price > 14 set quantity to 5"** - Bulk update quantities
-    - **"delete sales where quantity = 1"** - Remove single-item purchases
-
-    ### ETL Display Formatting Functions (Working Examples)
+    Your MCP server supports 4 ETL (Extract, Transform, Load) functions for data formatting:
 
     #### 1. Data Format Conversion
-    - **"show sales with Data Format Conversion"**
-    - **"display sales using Data Format Conversion format"**
-    - **"sales data with Data Format Conversion"**
+    - **Query Examples:** 
+      - "show sales with data format conversion"
+      - "convert sales data format"
+      - "format sales data for export"
     - **What it does:** Converts dates to string format, removes unnecessary fields
 
     #### 2. Decimal Value Formatting  
-    - **"show sales with Decimal Value Formatting"**
-    - **"display sales using Decimal Value Formatting format"**
-    - **"sales with Decimal Value Formatting"**
+    - **Query Examples:**
+      - "format sales prices with decimal formatting" 
+      - "show sales with 2 decimal places"
+      - "decimal value formatting for sales"
     - **What it does:** Formats all prices to exactly 2 decimal places as strings
 
     #### 3. String Concatenation
-    - **"show sales with String Concatenation"**
-    - **"display sales using String Concatenation format"**
-    - **"sales data with String Concatenation"**
+    - **Query Examples:**
+      - "combine sales fields for readability"
+      - "show sales with concatenated fields"
     - **What it does:** Creates readable summary fields by combining related data
 
     #### 4. Null Value Removal/Handling
-    - **"show sales with Null Value Removal/Handling"**
-    - **"display sales using Null Value Removal/Handling format"**
-    - **"sales with Null Value Removal/Handling"**
+    - **Query Examples:**
+      - "clean sales data with null handling"
+      - "remove nulls from sales data"
+      - "handle null values in sales"
     - **What it does:** Filters out incomplete records and handles null values
 
     ### Regular Operations
     - **"list all sales"** - Shows regular unformatted sales data
     - **"show customers"** - Shows customer data
     - **"list products"** - Shows product inventory
-
-    ### Smart Name-Based Operations
+    
+    ### Smart Name-Based Operations (NEW!)
     - **"delete customer Alice"** - Finds and deletes Alice by name
     - **"delete Alice Johnson"** - Finds customer by full name
     - **"remove Johnson"** - Finds customer by last name
@@ -2014,6 +1640,3 @@ with st.expander("🔧 Enhanced Features & Working Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
-
-
-
