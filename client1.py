@@ -690,6 +690,12 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name = 'John'\"}}\n"
     "   - **Example Query:** 'show care plans for address New York'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"address LIKE '%New York%'\"}}\n"
+
+    "7. **CARE PLAN COLUMN NAME MAPPING:**\n"
+    "   - 'name' → 'Name'\n"
+    "   - 'address' → 'Address'\n"
+    "   - 'phone number', 'phone' → 'PhoneNumber'\n"
+    "   - 'case notes', 'notes' → 'CaseNotes'\n"
 )
 
     user_prompt = f"""User query: "{query}"
@@ -1536,5 +1542,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
