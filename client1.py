@@ -544,7 +544,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     }
 
     system_prompt = (
-"You are an intelligent sales agent and database router for CRUD operations. "
+"You are an intelligent sales agent and database router for CRUD operations. \n"
     "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
 
     "AS A SALES AGENT, YOU SHOULD:\n"
@@ -597,44 +597,44 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     "- `sqlserver_crud`: supports `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`, `limit`\n"
     "- `postgresql_crud`: supports `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`, `limit`\n\n"
 
-    Query: "Record sale: Alice buys 3 of Laptop"
- { "tool": "sales_crud", "action": "create", "args": { "customer_name": "Alice", "product_name": "Laptop", "quantity": 3 } }
+    Query: "Record sale: Alice buys 3 of Laptop\n"
+ "{ "tool": "sales_crud", "action": "create", "args": { "customer_name": "Alice", "product_name": "Laptop", "quantity": 3 } }\n"
 
-Query: "List sales where quantity >= 5"
- { "tool": "sales_crud", "action": "read", "args": { "where_clause": "quantity >= 5" } }
+Query: "List sales where quantity >= 5\n"
+ "{ "tool": "sales_crud", "action": "read", "args": { "where_clause": "quantity >= 5" } }\n"
 
-Query: "List sales without customer name and product name"
- { "tool": "sales_crud", "action": "read", "args": { "columns": "*,-customer_name,-product_name" } }
+Query: "List sales without customer name and product name\n"
+ "{ "tool": "sales_crud", "action": "read", "args": { "columns": "*,-customer_name,-product_name" } }\n"
 
-Query: "Show sales of Alice and Bob"
-{ "tool": "sales_crud", "action": "read", "args": { "where_clause": "customer in ['Alice', 'Bob']" } }
+Query: "Show sales of Alice and Bob\n"
+"{ "tool": "sales_crud", "action": "read", "args": { "where_clause": "customer in ['Alice', 'Bob']" } }\n"
 
-Query: "Update sale 12 quantity to 7"
-{ "tool": "sales_crud", "action": "update", "args": { "sale_id": 12, "new_quantity": 7 } }
+Query: "Update sale 12 quantity to 7\n"
+"{ "tool": "sales_crud", "action": "update", "args": { "sale_id": 12, "new_quantity": 7 } }\n"
 
-Query: "Add customer John Doe with email john@example.com"
- { "tool": "sqlserver_crud", "action": "create", "args": { "first_name": "John", "last_name": "Doe", "email": "john@example.com" } }
+Query: "Add customer John Doe with email john@example.com\n"
+ "{ "tool": "sqlserver_crud", "action": "create", "args": { "first_name": "John", "last_name": "Doe", "email": "john@example.com" } }\n"
 
-Query: "List customers named Alice"
- { "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "name = 'Alice'" } }
+Query: "List customers named Alice\n"
+" { "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "name = 'Alice'" } }\n"
 
-Query: "List customers whose name contains 'Smith'"
- { "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "name like 'Smith'" } }
+Query: "List customers whose name contains 'Smith'\n"
+ "{ "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "name like 'Smith'" } }\n"
 
-Query: "Show customers without email"
- { "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "email is null" } }
+Query: "Show customers without email\n"
+ "{ "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "email is null" } }\n"
 
-Query: "Add product iPhone 15 for $999.99"
-l { "tool": "postgresql_crud", "action": "create", "args": { "name": "iPhone 15", "price": 999.99 } }
+Query: "Add product iPhone 15 for $999.99\n"
+" { "tool": "postgresql_crud", "action": "create", "args": { "name": "iPhone 15", "price": 999.99 } }\n"
 
-Query: "List products priced over $1000"
- { "tool": "postgresql_crud", "action": "read", "args": { "where_clause": "price > 1000" } }
+Query: "List products priced over $1000\n"
+ "{ "tool": "postgresql_crud", "action": "read", "args": { "where_clause": "price > 1000" } }\n"
 
-Query: "Update product 4 price to 750.50"
- { "tool": "postgresql_crud", "action": "update", "args": { "product_id": 4, "new_price": 750.50 } }
+Query: "Update product 4 price to 750.50\n"
+ "{ "tool": "postgresql_crud", "action": "update", "args": { "product_id": 4, "new_price": 750.50 } }\n"
 
-Query: "List product name and price only"
- { "tool": "postgresql_crud", "action": "read", "args": { "columns": "name, price" } }
+Query: "List product name and price only\n"
+ "{ "tool": "postgresql_crud", "action": "read", "args": { "columns": "name, price" } }\n"
     "ETL GUIDANCE FOR LLM:\n"
     "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
     "- Extract numeric values like price as float\n"
