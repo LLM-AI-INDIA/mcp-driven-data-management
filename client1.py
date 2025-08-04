@@ -544,7 +544,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     }
 
     system_prompt = (
-"You are an intelligent sales agent and database router for CRUD operations. \n"
+    "You are an intelligent sales agent and database router for CRUD operations. \n"
     "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
 
     "AS A SALES AGENT, YOU SHOULD:\n"
@@ -597,52 +597,38 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     "- `sqlserver_crud`: supports `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`, `limit`\n"
     "- `postgresql_crud`: supports `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`, `limit`\n\n"
 
-    Query: "Record sale: Alice buys 3 of Laptop\n"
- "{ "tool": "sales_crud", "action": "create", "args": { "customer_name": "Alice", "product_name": "Laptop", "quantity": 3 } }\n"
-
-Query: "List sales where quantity >= 5\n"
- "{ "tool": "sales_crud", "action": "read", "args": { "where_clause": "quantity >= 5" } }\n"
-
-Query: "List sales without customer name and product name\n"
- "{ "tool": "sales_crud", "action": "read", "args": { "columns": "*,-customer_name,-product_name" } }\n"
-
-Query: "Show sales of Alice and Bob\n"
-"{ "tool": "sales_crud", "action": "read", "args": { "where_clause": "customer in ['Alice', 'Bob']" } }\n"
-
-Query: "Update sale 12 quantity to 7\n"
-"{ "tool": "sales_crud", "action": "update", "args": { "sale_id": 12, "new_quantity": 7 } }\n"
-
-Query: "Add customer John Doe with email john@example.com\n"
- "{ "tool": "sqlserver_crud", "action": "create", "args": { "first_name": "John", "last_name": "Doe", "email": "john@example.com" } }\n"
-
-Query: "List customers named Alice\n"
-" { "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "name = 'Alice'" } }\n"
-
-Query: "List customers whose name contains 'Smith'\n"
- "{ "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "name like 'Smith'" } }\n"
-
-Query: "Show customers without email\n"
- "{ "tool": "sqlserver_crud", "action": "read", "args": { "where_clause": "email is null" } }\n"
-
-Query: "Add product iPhone 15 for $999.99\n"
-" { "tool": "postgresql_crud", "action": "create", "args": { "name": "iPhone 15", "price": 999.99 } }\n"
-
-Query: "List products priced over $1000\n"
- "{ "tool": "postgresql_crud", "action": "read", "args": { "where_clause": "price > 1000" } }\n"
-
-Query: "Update product 4 price to 750.50\n"
- "{ "tool": "postgresql_crud", "action": "update", "args": { "product_id": 4, "new_price": 750.50 } }\n"
-
-Query: "List product name and price only\n"
- "{ "tool": "postgresql_crud", "action": "read", "args": { "columns": "name, price" } }\n"
     "ETL GUIDANCE FOR LLM:\n"
     "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
     "- Extract numeric values like price as float\n"
     "- Split full names into first and last name if required\n"
     "- If category is not given, let the server default to 'Uncategorized'\n\n"
 
-    "If in doubt, route to `sales_crud` when transactions or purchases are involved."
-    )
+    "If in doubt, route to `sales_crud` when transactions or purchases are involved.\n\n"
+
+    "LLM EXAMPLES FOR REFERENCE:\n"
+
+    "Query: 'Record sale: Alice buys 3 of Laptop'\n"
+    "→ { \"tool\": \"sales_crud\", \"action\": \"create\", \"args\": { \"customer_name\": \"Alice\", \"product_name\": \"Laptop\", \"quantity\": 3 } }\n\n"
+    "Query: 'List sales where quantity >= 5'\n"
+    "→ { \"tool\": \"sales_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"quantity >= 5\" } }\n\n"
+    "Query: 'List sales without customer name and product name'\n"
+    "→ { \"tool\": \"sales_crud\", \"action\": \"read\", \"args\": { \"columns\": \"*,-customer_name,-product_name\" } }\n\n"
+    "Query: 'Show sales of Alice and Bob'\n"
+    "→ { \"tool\": \"sales_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"customer in ['Alice', 'Bob']\" } }\n\n"
+    "Query: 'Update sale 12 quantity to 7'\n"
+    "→ { \"tool\": \"sales_crud\", \"action\": \"update\", \"args\": { \"sale_id\": 12, \"new_quantity\": 7 } }\n\n"
+
+    "Query: 'Add customer John Doe with email john@example.com'\n"
+    "→ { \"tool\": \"sqlserver_crud\", \"action\": \"create\", \"args\": { \"first_name\": \"John\", \"last_name\": \"Doe\", \"email\": \"john@example.com\" } }\n\n"
+    "Query: 'List customers named Alice'\n"
+    "→ { \"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"name = 'Alice'\" } }\n\n"
+    "Query: 'List customers whose name contains Smith'\n"
+    "→ { \"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"name like 'Smith'\" } }\n\n"
+    "Query: 'Add product iPhone 15 for $999.99'\n"
+    "→ { \"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": { \"name\": \"iPhone 15\", \"price\": 999.99 } }\n\n"
+    "Query: 'List products priced over $1000'\n"
+    "→ { \"tool\": \"postgresql_crud\", \"action\": \"read\", \"args\": { \"where_clause\": \"price > 1000\" } }\n"
+)
 
     user_prompt = f"""
     Based on this database operation context, generate a brief natural response:
