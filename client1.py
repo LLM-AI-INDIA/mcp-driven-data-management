@@ -358,7 +358,7 @@ with st.sidebar:
         st.button("Clear/Reset", key="clear_button")
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
-    logo_base64 = get_image_base64("Logo.png")
+    logo_base64 = get_image_base64("Picture1.png")
     st.markdown(
     f"""
     <div class="sidebar-logo-row">
@@ -1640,3 +1640,4 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
