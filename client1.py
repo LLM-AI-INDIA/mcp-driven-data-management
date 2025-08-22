@@ -1,19 +1,34 @@
-    import os, re, json, ast, asyncio
+import os, re, json, ast, asyncio
 import pandas as pd
 import streamlit as st
 import base64
 from io import BytesIO
 from PIL import Image
-from groq import Groq 
+from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage, SystemMessage
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
-from datetime import datetime, date # Import datetime and date for date formatting
-from decimal import Decimal, InvalidOperation # Import Decimal for precise decimal handling
-
+import re
 from dotenv import load_dotenv
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import hashlib
 
 load_dotenv()
+
+# Initialize Groq client with environment variable
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
+    st.stop()
+
+groq_client = ChatGroq(
+    groq_api_key=GROQ_API_KEY,
+    model_name=os.environ.get("GROQ_MODEL", "deepseek-r1-distill-llama-70b")
+)
+
 # ========== PAGE CONFIG ==========
 st.set_page_config(page_title="MCP CRUD Chat", layout="wide")
 
@@ -60,15 +75,15 @@ st.markdown("""
         margin-bottom: 0 !important;
     }
     .stButton>button {
-            width: 100%;
-            height: 3rem;
-            background: #39e639;
-            color: #222;
-            font-size: 1.1rem;
-            font-weight: bold;
-            border-radius: 10px;
-            margin-bottom: 2rem;
-        }
+        width: 100%;
+        height: 3rem;
+        background: #39e639;
+        color: #222;
+        font-size: 1.1rem;
+        font-weight: bold;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+    }
     /* Small refresh button styling */
     .small-refresh-button button {
         width: auto !important;
@@ -245,21 +260,117 @@ st.markdown("""
     .expandable {
         margin-top: 8px;
     }
-
     [data-testid="stSidebar"] .stSelectbox label {
         color: #fff !important;
         font-weight: 500;
         font-size: 1.07rem;
     }
+    
+    /* Visualization-specific styles */
+    .visualization-section {
+        background: #f8fafc;
+        border-radius: 12px;
+        padding: 20px;
+        margin: 16px 0;
+        border-left: 4px solid #4286f4;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+    
+    .chart-insights {
+        background: #fff;
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 12px;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .quick-viz-buttons {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin-top: 12px;
+    }
+    
+    .quick-viz-buttons button {
+        background: linear-gradient(135deg, #4286f4, #397dd2) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+        padding: 6px 12px !important;
+        font-size: 0.85rem !important;
+        font-weight: 500 !important;
+        cursor: pointer !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 2px 4px rgba(66, 134, 244, 0.2) !important;
+    }
+    
+    .quick-viz-buttons button:hover {
+        background: linear-gradient(135deg, #397dd2, #2968c4) !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 8px rgba(66, 134, 244, 0.3) !important;
+    }
+    
+    .chart-title {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #2d3748;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .insight-badge {
+        background: linear-gradient(135deg, #38b2ac, #319795);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin-left: 8px;
+    }
+    
+    .viz-stats {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+    }
+    
+    .viz-stat {
+        background: #e6f0ff;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        color: #2d3748;
+        border: 1px solid #bee3f8;
+    }
+    
+    .viz-stat strong {
+        color: #4286f4;
+        font-weight: 600;
+    }
     </style>
 """, unsafe_allow_html=True)
 
+# ========== HELPER FUNCTIONS ==========
+def hash_text(text):
+    """Create a hash for unique component keys"""
+    return hashlib.md5(str(text).encode()).hexdigest()[:8]
+
+def _clean_json(raw: str) -> str:
+    fences = re.findall(r"``````", raw, re.DOTALL)
+    if fences:
+        return fences[0].strip()
+    # If no JSON code fence, try to find JSON-like content
+    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+    return json_match.group(0).strip() if json_match else raw.strip()
 
 # ========== DYNAMIC TOOL DISCOVERY FUNCTIONS ==========
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000/mcp')}") 
+        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000')}/mcp")
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
@@ -267,11 +378,9 @@ async def _discover_tools() -> dict:
         st.error(f"Failed to discover tools: {e}")
         return {}
 
-
 def discover_tools() -> dict:
     """Synchronous wrapper for tool discovery"""
     return asyncio.run(_discover_tools())
-
 
 def generate_tool_descriptions(tools_dict: dict) -> str:
     """Generate tool descriptions string from discovered tools"""
@@ -284,6 +393,1127 @@ def generate_tool_descriptions(tools_dict: dict) -> str:
 
     return "\n".join(descriptions)
 
+def get_image_base64(img_path):
+    img = Image.open(img_path)
+    buffered = BytesIO()
+    img.save(buffered, format="PNG")
+    img_bytes = buffered.getvalue()
+    img_base64 = base64.b64encode(img_bytes).decode()
+    return img_base64
+
+# ========== VISUALIZATION FUNCTIONS ==========
+def create_plotly_chart(chart_config):
+    """Create Plotly chart from configuration"""
+    
+    if not chart_config or chart_config.get("type") == "error":
+        return None
+    
+    chart_type = chart_config.get("type")
+    layout = chart_config.get("layout", {})
+    
+    fig = None
+    
+    if chart_type == "bar":
+        data = chart_config.get("data", [])
+        x_values = [item["x"] for item in data]
+        y_values = [item["y"] for item in data]
+        
+        fig = go.Figure(data=[
+            go.Bar(x=x_values, y=y_values, name="", marker_color='#4286f4')
+        ])
+        
+    elif chart_type == "line":
+        data = chart_config.get("data", [])
+        x_values = [item["x"] for item in data]
+        y_values = [item["y"] for item in data]
+        
+        fig = go.Figure(data=[
+            go.Scatter(x=x_values, y=y_values, mode='lines+markers', 
+                      name="", line=dict(color='#4286f4', width=3),
+                      marker=dict(size=8))
+        ])
+        
+    elif chart_type == "pie":
+        pie_data = chart_config.get("data", {})
+        labels = pie_data.get("labels", [])
+        values = pie_data.get("values", [])
+        
+        fig = go.Figure(data=[
+            go.Pie(labels=labels, values=values, hole=0.3,
+                  marker=dict(colors=px.colors.qualitative.Set3))
+        ])
+        
+    elif chart_type == "scatter":
+        data = chart_config.get("data", [])
+        x_values = [item["x"] for item in data]
+        y_values = [item["y"] for item in data]
+        
+        fig = go.Figure(data=[
+            go.Scatter(x=x_values, y=y_values, mode='markers',
+                      name="", marker=dict(size=10, color='#4286f4'))
+        ])
+        
+    elif chart_type == "multi":
+        # Handle multiple charts in subplots
+        charts = chart_config.get("charts", [])
+        if len(charts) >= 2:
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=[chart.get("layout", {}).get("title", f"Chart {i+1}") 
+                               for i, chart in enumerate(charts[:4])],
+                specs=[[{"type": "xy"}, {"type": "xy"}],
+                       [{"type": "domain"}, {"type": "xy"}]]
+            )
+            
+            # Add first chart (bar)
+            if len(charts) > 0 and charts[0].get("type") == "bar":
+                data = charts[0].get("data", [])
+                x_vals = [item["x"] for item in data]
+                y_vals = [item["y"] for item in data]
+                fig.add_trace(go.Bar(x=x_vals, y=y_vals, name="Sales by Customer", 
+                                   marker_color='#4286f4'), row=1, col=1)
+            
+            # Add second chart (line)
+            if len(charts) > 1 and charts[1].get("type") == "line":
+                data = charts[1].get("data", [])
+                x_vals = [item["x"] for item in data]
+                y_vals = [item["y"] for item in data]
+                fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers',
+                                       name="Trend", line=dict(color='#39e639')), row=1, col=2)
+            
+            # Add third chart (pie)
+            if len(charts) > 2 and charts[2].get("type") == "pie":
+                pie_data = charts[2].get("data", {})
+                labels = pie_data.get("labels", [])
+                values = pie_data.get("values", [])
+                fig.add_trace(go.Pie(labels=labels, values=values, name="Distribution",
+                                   marker=dict(colors=px.colors.qualitative.Pastel)), row=2, col=1)
+    
+    if fig:
+        # Apply layout
+        fig.update_layout(
+            title=layout.get("title", "Data Visualization"),
+            height=600,
+            showlegend=layout.get("showlegend", True),
+            template="plotly_white",
+            font=dict(family="Arial, sans-serif", size=12),
+            title_font=dict(size=16, color="#222"),
+            margin=dict(l=40, r=40, t=60, b=40)
+        )
+        
+        # Update axis labels if provided
+        if layout.get("xaxis"):
+            fig.update_xaxes(title_text=layout["xaxis"].get("title", ""))
+        if layout.get("yaxis"):
+            fig.update_yaxes(title_text=layout["yaxis"].get("title", ""))
+    
+    return fig
+
+def generate_chart_insights(chart_config, viz_result):
+    """Generate AI insights about the chart data"""
+    
+    chart_type = viz_result.get('chart_type', 'unknown')
+    data_count = viz_result.get('data_count', 0)
+    data_source = viz_result.get('data_source', 'unknown')
+    
+    # Prepare context for LLM
+    context = {
+        "chart_type": chart_type,
+        "data_source": data_source,
+        "data_count": data_count,
+        "chart_config": chart_config
+    }
+    
+    system_prompt = (
+        "You are a data analyst AI. Generate concise, actionable insights about the data visualization. "
+        "Focus on trends, patterns, outliers, and business implications. Be specific and valuable."
+    )
+    
+    user_prompt = f"""
+    Analyze this data visualization and provide 3-5 key insights:
+    
+    Chart Type: {chart_type}
+    Data Source: {data_source}
+    Records: {data_count}
+    
+    Chart Configuration: {json.dumps(chart_config, indent=2)}
+    
+    Provide insights in markdown format with bullet points. Focus on:
+    1. Key patterns or trends
+    2. Notable outliers or interesting data points
+    3. Business implications
+    4. Recommended actions (if applicable)
+    """
+    
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+        response = groq_client.invoke(messages)
+        return response.content.strip()
+    except Exception as e:
+        return f"""
+        **Key Insights:**
+        • Analyzed {data_count} records from {data_source} data
+        • Generated {chart_type} visualization for trend analysis
+        • Chart shows data distribution and patterns
+        • Consider using filters for deeper analysis
+        
+        *Note: AI insight generation temporarily unavailable*
+        """
+
+def render_visualization_section(viz_result, user_query):
+    """Render the visualization section similar to Claude's approach"""
+    
+    if not viz_result or viz_result.get("error"):
+        st.error(f"❌ Visualization Error: {viz_result.get('error', 'Unknown error')}")
+        return
+    
+    chart_config = viz_result.get("chart_config")
+    if not chart_config:
+        st.warning("⚠️ No chart configuration generated")
+        return
+    
+    # Main visualization section
+    st.markdown("### 📊 Data Visualization")
+    
+    # Create the chart
+    fig = create_plotly_chart(chart_config)
+    
+    if fig:
+        # Display the chart
+        st.plotly_chart(fig, use_container_width=True, key=f"chart_{hash_text(user_query)}")
+        
+        # Chart insights section
+        with st.expander("📈 Chart Insights & Details", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Chart Information:**")
+                st.write(f"• **Chart Type:** {viz_result.get('chart_type', 'Unknown').title()}")
+                st.write(f"• **Data Source:** {viz_result.get('data_source', 'Unknown').title()}")
+                st.write(f"• **Records Analyzed:** {viz_result.get('data_count', 0):,}")
+                
+                if viz_result.get("sql"):
+                    st.markdown("**SQL Query Used:**")
+                    st.code(viz_result["sql"], language="sql")
+            
+            with col2:
+                st.markdown("**Chart Configuration:**")
+                st.json(chart_config, expanded=False)
+                
+                # Export options
+                st.markdown("**Export Options:**")
+                if st.button("📥 Download Chart as PNG", key=f"export_{hash_text(user_query)}"):
+                    st.info("Chart export feature - implementation needed for file download")
+        
+        # AI Insights section
+        with st.expander("🤖 AI-Generated Insights", expanded=True):
+            # Generate insights using the LLM
+            insights = generate_chart_insights(chart_config, viz_result)
+            st.markdown(insights)
+    else:
+        st.error("❌ Failed to generate chart visualization")
+
+async def handle_visualization_request(parsed_query, user_query):
+    """Handle visualization requests by creating mock chart data"""
+    
+    try:
+        # Extract parameters from parsed query
+        tool = parsed_query.get("tool", "sales_crud")
+        chart_type = parsed_query.get("chart_type", "bar")
+        args = parsed_query.get("args", {})
+        
+        # Map tool to data source
+        data_source_map = {
+            "sales_crud": "sales",
+            "sqlserver_crud": "customers", 
+            "postgresql_crud": "products",
+            "careplan_crud": "careplan"
+        }
+        
+        data_source = data_source_map.get(tool, "sales")
+        
+        # Get actual data from the MCP tool
+        raw_data = await _invoke_tool(tool, "read", args)
+        
+        if not raw_data or not isinstance(raw_data, dict) or not raw_data.get("result"):
+            return {"error": "No data found for visualization", "chart_config": None}
+        
+        data = raw_data["result"]
+        data_count = len(data) if isinstance(data, list) else 0
+        
+        # Create chart configuration based on chart type and data
+        chart_config = create_chart_config_from_data(data, chart_type, data_source)
+        
+        return {
+            "chart_type": chart_type,
+            "data_source": data_source,
+            "chart_config": chart_config,
+            "data_count": data_count,
+            "sql": raw_data.get("sql", ""),
+            "success": True
+        }
+        
+    except Exception as e:
+        return {"error": f"Visualization processing error: {str(e)}", "chart_config": None}
+
+def create_chart_config_from_data(data, chart_type, data_source):
+    """Create chart configuration from actual data"""
+    
+    if not data or not isinstance(data, list) or len(data) == 0:
+        return {"error": "No data available for visualization"}
+    
+    # Auto-detect fields based on data source
+    if data_source == "sales":
+        x_field = "customer_name" if "customer_name" in data[0] else "Name"
+        y_field = "total_price" if "total_price" in data[0] else "unit_price"
+    elif data_source == "customers":
+        x_field = "Name" if "Name" in data[0] else "name"
+        y_field = "Id" if "Id" in data[0] else "id"
+    elif data_source == "products":
+        x_field = "name"
+        y_field = "price"
+    else:
+        # Default to first text field and first numeric field
+        x_field = None
+        y_field = None
+        for key, value in data[0].items():
+            if x_field is None and isinstance(value, str):
+                x_field = key
+            if y_field is None and isinstance(value, (int, float)):
+                y_field = key
+    
+    if chart_type == "bar":
+        return create_bar_chart_config(data, x_field, y_field)
+    elif chart_type == "line":
+        return create_line_chart_config(data, x_field, y_field)
+    elif chart_type == "pie":
+        return create_pie_chart_config(data, x_field, y_field)
+    elif chart_type == "scatter":
+        return create_scatter_chart_config(data, x_field, y_field)
+    elif chart_type == "multi":
+        return create_multi_chart_config(data, data_source)
+    else:
+        return create_bar_chart_config(data, x_field, y_field)
+
+def create_bar_chart_config(data, x_field, y_field):
+    """Create bar chart configuration from data"""
+    chart_data = []
+    
+    # Aggregate data by x_field
+    aggregated = {}
+    for row in data:
+        key = str(row.get(x_field, "Unknown"))
+        value = float(row.get(y_field, 0)) if row.get(y_field) is not None else 0
+        
+        if key in aggregated:
+            aggregated[key] += value
+        else:
+            aggregated[key] = value
+    
+    chart_data = [{"x": k, "y": v} for k, v in aggregated.items()]
+    
+    return {
+        "type": "bar",
+        "data": chart_data,
+        "layout": {
+            "title": f"Bar Chart - {y_field} by {x_field}",
+            "xaxis": {"title": x_field.replace("_", " ").title()},
+            "yaxis": {"title": y_field.replace("_", " ").title()},
+            "showlegend": False
+        }
+    }
+
+def create_line_chart_config(data, x_field, y_field):
+    """Create line chart configuration from data"""
+    # Sort data and create line chart
+    sorted_data = sorted(data, key=lambda x: x.get(x_field, ""))
+    chart_data = [{"x": row.get(x_field), "y": float(row.get(y_field, 0))} for row in sorted_data]
+    
+    return {
+        "type": "line",
+        "data": chart_data,
+        "layout": {
+            "title": f"Line Chart - {y_field} Over {x_field}",
+            "xaxis": {"title": x_field.replace("_", " ").title()},
+            "yaxis": {"title": y_field.replace("_", " ").title()},
+            "showlegend": False
+        }
+    }
+
+def create_pie_chart_config(data, x_field, y_field):
+    """Create pie chart configuration from data"""
+    # Aggregate data for pie chart
+    aggregated = {}
+    for row in data:
+        key = str(row.get(x_field, "Unknown"))
+        value = float(row.get(y_field, 0)) if row.get(y_field) is not None else 1
+        
+        if key in aggregated:
+            aggregated[key] += value
+        else:
+            aggregated[key] = value
+    
+    return {
+        "type": "pie",
+        "data": {
+            "labels": list(aggregated.keys()),
+            "values": list(aggregated.values())
+        },
+        "layout": {
+            "title": f"Pie Chart - Distribution of {y_field}",
+            "showlegend": True
+        }
+    }
+
+def create_scatter_chart_config(data, x_field, y_field):
+    """Create scatter plot configuration from data"""
+    chart_data = []
+    for row in data:
+        x_val = row.get(x_field)
+        y_val = row.get(y_field)
+        if x_val is not None and y_val is not None:
+            try:
+                chart_data.append({"x": float(x_val), "y": float(y_val)})
+            except (ValueError, TypeError):
+                continue
+    
+    return {
+        "type": "scatter",
+        "data": chart_data,
+        "layout": {
+            "title": f"Scatter Plot - {y_field} vs {x_field}",
+            "xaxis": {"title": x_field.replace("_", " ").title()},
+            "yaxis": {"title": y_field.replace("_", " ").title()},
+            "showlegend": False
+        }
+    }
+
+def create_multi_chart_config(data, data_source):
+    """Create multiple charts for dashboard view"""
+    charts = []
+    
+    if data_source == "sales":
+        # Bar chart of sales by customer
+        charts.append(create_bar_chart_config(data, "customer_name", "total_price"))
+        # Line chart over time
+        if "sale_date" in data[0]:
+            charts.append(create_line_chart_config(data, "sale_date", "total_price"))
+        # Pie chart of product distribution
+        if "product_name" in data[0]:
+            charts.append(create_pie_chart_config(data, "product_name", "quantity"))
+    
+    return {
+        "type": "multi",
+        "charts": charts,
+        "layout": {
+            "title": f"{data_source.title()} Analytics Dashboard",
+            "grid": {"rows": 2, "columns": 2}
+        }
+    }
+
+# ========== PARAMETER VALIDATION FUNCTION ==========
+def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
+    """Validate and clean parameters for specific tools"""
+
+    if tool_name == "sales_crud":
+        # Define allowed parameters for sales_crud (with WHERE clause support)
+        allowed_params = {
+            'operation', 'customer_id', 'product_id', 'quantity',
+            'unit_price', 'total_amount', 'sale_id', 'new_quantity',
+            'table_name', 'display_format', 'customer_name',
+            'product_name', 'email', 'total_price',
+            'columns',  # Column selection
+            'where_clause',  # WHERE conditions
+            'filter_conditions',  # Structured filters
+            'limit'  # Row limit
+        }
+
+        # Clean args to only include allowed parameters
+        cleaned_args = {k: v for k, v in args.items() if k in allowed_params}
+
+        # Validate display_format values
+        if 'display_format' in cleaned_args:
+            valid_formats = [
+                'Data Format Conversion',
+                'Decimal Value Formatting',
+                'String Concatenation',
+                'Null Value Removal/Handling'
+            ]
+            if cleaned_args['display_format'] not in valid_formats:
+                cleaned_args.pop('display_format', None)
+
+        # Clean up columns parameter
+        if 'columns' in cleaned_args:
+            if isinstance(cleaned_args['columns'], str) and cleaned_args['columns'].strip():
+                columns_str = cleaned_args['columns'].strip()
+                columns_list = [col.strip() for col in columns_str.split(',') if col.strip()]
+                cleaned_args['columns'] = ','.join(columns_list)
+            else:
+                cleaned_args.pop('columns', None)
+
+        # Validate WHERE clause
+        if 'where_clause' in cleaned_args:
+            if not isinstance(cleaned_args['where_clause'], str) or not cleaned_args['where_clause'].strip():
+                cleaned_args.pop('where_clause', None)
+
+        # Validate limit
+        if 'limit' in cleaned_args:
+            try:
+                limit_val = int(cleaned_args['limit'])
+                if limit_val <= 0 or limit_val > 1000:  # Reasonable limits
+                    cleaned_args.pop('limit', None)
+                else:
+                    cleaned_args['limit'] = limit_val
+            except (ValueError, TypeError):
+                cleaned_args.pop('limit', None)
+
+        return cleaned_args
+
+    elif tool_name == "sqlserver_crud":
+        allowed_params = {
+            'operation', 'name', 'email', 'limit', 'customer_id',
+            'new_email', 'table_name'
+        }
+        return {k: v for k, v in args.items() if k in allowed_params}
+
+    elif tool_name == "postgresql_crud":
+        allowed_params = {
+            'operation', 'name', 'price', 'description', 'limit',
+            'product_id', 'new_price', 'table_name'
+        }
+        return {k: v for k, v in args.items() if k in allowed_params}
+
+    return args
+
+# ========== NEW LLM RESPONSE GENERATOR ==========
+def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
+    """Generate LLM response based on operation result with context"""
+
+    # Prepare context for LLM
+    context = {
+        "action": action,
+        "tool": tool,
+        "user_query": user_query,
+        "operation_result": operation_result
+    }
+
+    system_prompt = (
+        "You are a helpful database assistant. Generate a brief, natural response "
+        "explaining what operation was performed and its result. Be conversational "
+        "and informative. Focus on the business context and user-friendly explanation."
+    )
+
+    user_prompt = f"""
+    Based on this database operation context, generate a brief natural response:
+
+    User asked: "{user_query}"
+    Operation: {action}
+    Tool used: {tool}
+    Result: {json.dumps(operation_result, indent=2)}
+
+    Generate a single line response explaining what was done and the outcome.
+    """
+
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+        response = groq_client.invoke(messages)
+        return response.content.strip()
+    except Exception as e:
+        # Fallback response if LLM call fails
+        if action == "read":
+            return f"Successfully retrieved data from {tool}."
+        elif action == "create":
+            return f"Successfully created new record in {tool}."
+        elif action == "update":
+            return f"Successfully updated record in {tool}."
+        elif action == "delete":
+            return f"Successfully deleted record from {tool}."
+        elif action == "describe":
+            return f"Successfully retrieved table schema from {tool}."
+        else:
+            return f"Operation completed successfully using {tool}."
+
+def parse_user_query(query: str, available_tools: dict) -> dict:
+    """Enhanced parse user query with visualization detection"""
+
+    if not available_tools:
+        return {"error": "No tools available"}
+
+    # Build comprehensive tool information for the LLM
+    tool_info = []
+    for tool_name, tool_desc in available_tools.items():
+        tool_info.append(f"- **{tool_name}**: {tool_desc}")
+
+    tools_description = "\n".join(tool_info)
+
+    # Check for visualization keywords
+    visualization_keywords = [
+        'chart', 'graph', 'plot', 'visualize', 'visualization', 'dashboard',
+        'bar chart', 'line chart', 'pie chart', 'scatter plot', 'histogram',
+        'show me a chart', 'create a graph', 'plot the data', 'visualize the data',
+        'make a dashboard', 'analytics dashboard', 'trend analysis', 'data visualization'
+    ]
+    
+    is_visualization_request = any(keyword in query.lower() for keyword in visualization_keywords)
+
+    system_prompt = (
+    "You are an intelligent database router for CRUD operations and data visualization. "
+    "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
+
+    "RESPONSE FORMAT:\n"
+    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object, \"is_visualization\": boolean, \"chart_type\": string|null}\n\n"
+
+    "ACTION MAPPING:\n"
+    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
+    "- 'create': for adding, inserting, or creating NEW records\n"
+    "- 'update': for modifying, changing, or updating existing records\n"
+    "- 'delete': for removing, deleting, or destroying records\n"
+    "- 'describe': for showing table structure, schema, or column information\n"
+    "- 'visualize': for creating charts, graphs, or dashboards\n\n"
+
+    "VISUALIZATION DETECTION:\n"
+    "If the query contains visualization keywords like 'chart', 'graph', 'plot', 'visualize', 'dashboard', set:\n"
+    "- \"is_visualization\": true\n"
+    "- \"action\": \"visualize\"\n"
+    "- \"chart_type\": one of [\"bar\", \"line\", \"pie\", \"scatter\", \"multi\"]\n\n"
+
+    "CHART TYPE MAPPING:\n"
+    "- **Bar Chart**: 'bar chart', 'column chart', 'compare', 'breakdown by category'\n"
+    "- **Line Chart**: 'line chart', 'trend', 'over time', 'timeline', 'temporal analysis'\n"
+    "- **Pie Chart**: 'pie chart', 'distribution', 'percentage', 'proportion', 'share'\n"
+    "- **Scatter Plot**: 'scatter', 'correlation', 'relationship between', 'x vs y'\n"
+    "- **Multi**: 'dashboard', 'multiple charts', 'comprehensive view', 'analytics'\n\n"
+
+    f"VISUALIZATION EXAMPLES:\n"
+    "- 'show me a bar chart of sales by customer' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"bar\"}}\n"
+    "- 'visualize sales trends over time' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"line\"}}\n"
+    "- 'create a pie chart of customer distribution' → {{\"tool\": \"sqlserver_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"pie\"}}\n"
+    "- 'plot product prices vs sales' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"scatter\"}}\n"
+    "- 'create a dashboard for sales analysis' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"multi\"}}\n\n"
+
+    "CRITICAL TOOL SELECTION RULES:\n"
+    "\n"
+    "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
+    "   - 'list products', 'show products', 'display products'\n"
+    "   - 'product inventory', 'product catalog', 'product information'\n"
+    "   - 'add product', 'create product', 'new product'\n"
+    "   - 'update product', 'change product price', 'modify product'\n"
+    "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
+    "   - Any query primarily about products, pricing, or inventory\n"
+    "   - 'visualize product prices', 'chart of product distribution'\n"
+    "\n"
+    "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
+    "   - 'list customers', 'show customers', 'display customers'\n"
+    "   - 'customer information', 'customer details'\n"
+    "   - 'add customer', 'create customer', 'new customer'\n"
+    "   - 'update customer', 'change customer email', 'modify customer'\n"
+    "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
+    "   - Any query primarily about customers, names, or emails\n"
+    "   - 'visualize customer data', 'chart of customer distribution'\n"
+    "\n"
+    "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
+    "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
+    "   - 'sales report', 'revenue data', 'purchase history'\n"
+    "   - 'who bought what', 'customer purchases'\n"
+    "   - Cross-database queries combining customer + product + sales info\n"
+    "   - 'create sale', 'add sale', 'new transaction'\n"
+    "   - Any query asking for combined data from multiple tables\n"
+    "   - 'visualize sales', 'sales dashboard', 'chart sales trends'\n"
+    "\n"
+    "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
+    "   - 'show care plans', 'list case notes', 'display care plans', 'care plan records'\n"
+    "   - 'list care plans with name John', 'care plans mentioning cancer'\n"
+    "   - 'show care plan without address', 'display only name and notes'\n"
+    "   - Any query related to healthcare records with Name, Address, Phone Number, Case Notes\n"
+    "   - 'visualize care plan data', 'chart of case types'\n\n"
+
+    "**ETL & DISPLAY FORMATTING RULES:**\n"
+    "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
+    "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
+
+    "1. **DECIMAL FORMATTING:**\n"
+    "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
+    "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
+    "   - **Example Query:** 'show sales with 2 decimal places'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
+
+    "2. **DATE FORMATTING:**\n"
+    "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
+    "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
+    "   - **Example Query:** 'show sales with formatted dates'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
+
+    "3. **NULL VALUE HANDLING:**\n"
+    "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
+    "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
+    "   - **Example Query:** 'show sales but remove records with missing info'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
+
+    "4. **STRING CONCATENATION:**\n"
+    "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
+    "   - Use: {\"display_format\": \"String Concatenation\"}\n"
+    "   - **Example Query:** 'show sales with customer full names'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
+
+    "5. **CARE PLAN COLUMN FILTERING:**\n"
+    "   - If the user asks to 'show only name and notes', 'remove address', or 'exclude phone number'.\n"
+    "   - For EXCLUSION queries (exclude, remove, without, but not):\n"
+    "   - **Example Query:** 'show care plans without phone number and address'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude phone_number,address\"}}\n"
+    "   - **Example Query:** 'list care plans but exclude phone number and address'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude phone_number,address\"}}\n"
+    "   - **Example Query:** 'show care plans without address'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude address\"}}\n"
+    "   - For POSITIVE selection:\n"
+    "   - **Example Query:** 'show only name and case notes from care plans'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name,case_notes\"}}\n"
+
+    "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
+    "   - For name-based searches, use the 'name' parameter directly\n"
+    "   - **Example Query:** 'show records in care plan where name is John'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"name\": \"John\"}}\n"
+    "   - **Example Query:** 'care plans for Emily'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"name\": \"Emily\"}}\n"
+    "   - For case notes searches, use where_clause with LIKE\n"
+    "   - **Example Query:** 'care plans mentioning cancer'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"case_notes LIKE '%cancer%'\"}}\n"
+    "   - **Example Query:** 'show care plans for address New York'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"address LIKE '%New York%'\"}}\n"
+
+    "7. **CARE PLAN COLUMN NAME MAPPING:**\n"
+    "   - 'name' → 'Name'\n"
+    "   - 'address' → 'Address'\n"
+    "   - 'phone number', 'phone' → 'PhoneNumber'\n"
+    "   - 'case notes', 'notes' → 'CaseNotes'\n"
+)
+
+    user_prompt = f"""User query: "{query}"
+
+Analyze the query step by step:
+
+1. Is this a VISUALIZATION request? (Look for keywords: chart, graph, plot, visualize, dashboard)
+2. If YES to #1, what CHART TYPE is most appropriate?
+3. What is the PRIMARY INTENT? (product, customer, sales, or care plan operation)
+4. What ACTION is being requested? (create, read, update, delete, describe, visualize)
+5. What ENTITY NAME needs to be extracted? (for delete/update operations)
+6. What SPECIFIC COLUMNS are requested? (for read operations)
+7. What FILTER CONDITIONS are specified? (for read operations)
+8. What PARAMETERS need to be extracted from the natural language?
+
+VISUALIZATION REQUEST DETECTION:
+- If query contains words like: chart, graph, plot, visualize, dashboard → set "is_visualization": true and "action": "visualize"
+- Determine appropriate chart_type based on the query context
+
+Respond with the exact JSON format with properly extracted parameters including visualization flags."""
+
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+        resp = groq_client.invoke(messages)
+
+        raw = _clean_json(resp.content)
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            try:
+                result = ast.literal_eval(raw)
+            except:
+                result = {
+                    "tool": list(available_tools.keys())[0], 
+                    "action": "read", 
+                    "args": {},
+                    "is_visualization": is_visualization_request,
+                    "chart_type": None
+                }
+
+        # Ensure visualization flags are present
+        if "is_visualization" not in result:
+            result["is_visualization"] = is_visualization_request
+        
+        if "chart_type" not in result and result.get("is_visualization"):
+            # Auto-detect chart type from query
+            if any(word in query.lower() for word in ['bar', 'column', 'compare', 'breakdown']):
+                result["chart_type"] = "bar"
+            elif any(word in query.lower() for word in ['line', 'trend', 'over time', 'timeline']):
+                result["chart_type"] = "line"
+            elif any(word in query.lower() for word in ['pie', 'distribution', 'percentage', 'proportion']):
+                result["chart_type"] = "pie"
+            elif any(word in query.lower() for word in ['scatter', 'correlation', 'relationship']):
+                result["chart_type"] = "scatter"
+            elif any(word in query.lower() for word in ['dashboard', 'multiple', 'comprehensive']):
+                result["chart_type"] = "multi"
+            else:
+                result["chart_type"] = "bar"  # Default
+
+        # Set action to visualize if it's a visualization request
+        if result.get("is_visualization") and result.get("action") != "visualize":
+            result["action"] = "visualize"
+
+        # Rest of the existing parsing logic...
+        # Normalize action names
+        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
+            result["action"] = "read"
+
+        # ENHANCED parameter extraction for DELETE and UPDATE operations
+        if result.get("action") in ["delete", "update"]:
+            args = result.get("args", {})
+            
+            # Extract entity name for delete/update operations if not already extracted
+            if "name" not in args:
+                import re
+                
+                # Enhanced regex patterns for delete operations
+                delete_patterns = [
+                    r'(?:delete|remove)\s+(?:product\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
+                    r'(?:delete|remove)\s+(?:customer\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
+                    r'(?:delete|remove)\s+([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)'
+                ]
+                
+                # Enhanced regex patterns for update operations
+                update_patterns = [
+                    r'(?:update|change|set)\s+(?:price\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
+                    r'(?:update|change|set)\s+(?:email\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
+                    r'(?:update|change|set)\s+([A-Za-z][A-Za-z0-9\s]*?)\s+(?:price|email)\s+(?:to|=)',
+                ]
+                
+                all_patterns = delete_patterns + update_patterns
+                
+                for pattern in all_patterns:
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        extracted_name = match.group(1).strip()
+                        # Clean up common words that might be captured
+                        stop_words = ['product', 'customer', 'price', 'email', 'to', 'of', 'the', 'a', 'an']
+                        name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
+                        if name_words:
+                            args["name"] = ' '.join(name_words)
+                            print(f"DEBUG: Extracted name '{args['name']}' from query '{query}'")
+                            break
+            
+            # Extract new_price for product updates
+            if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
+                import re
+                price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
+                if price_match:
+                    args["new_price"] = float(price_match.group(1))
+                    print(f"DEBUG: Extracted new_price '{args['new_price']}' from query '{query}'")
+            
+            # Extract new_email for customer updates
+            if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
+                import re
+                email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
+                if email_match:
+                    args["new_email"] = email_match.group(1)
+                    print(f"DEBUG: Extracted new_email '{args['new_email']}' from query '{query}'")
+            
+            result["args"] = args
+
+        # Enhanced parameter extraction for create operations
+        elif result.get("action") == "create":
+            args = result.get("args", {})
+            
+            # Extract name and email from query if not already extracted
+            if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
+                # Try to extract name and email using regex patterns
+                import re
+                
+                # Extract email
+                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
+                if email_match and "email" not in args:
+                    args["email"] = email_match.group(0)
+                
+                # Extract name (everything between 'customer' and 'with' or before email)
+                if "name" not in args:
+                    # Pattern 1: "create customer [Name] with [email]"
+                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
+                    if not name_match:
+                        # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
+                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
+                    if not name_match:
+                        # Pattern 3: Extract everything before the email
+                        if email_match:
+                            name_part = query[:email_match.start()].strip()
+                            name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
+                    
+                    if name_match:
+                        extracted_name = name_match.group(1).strip()
+                        # Clean up common words
+                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name, flags=re.IGNORECASE).strip()
+                        if extracted_name:
+                            args["name"] = extracted_name
+            
+            result["args"] = args
+
+        # Enhanced parameter extraction for read operations with columns and where_clause
+        elif result.get("action") == "read" and result.get("tool") == "sales_crud":
+            args = result.get("args", {})
+            
+            # Extract columns if not already extracted
+            if "columns" not in args:
+                import re
+                
+                # Look for column specification patterns
+                column_patterns = [
+                    r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
+                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
+                    r'display\s+(.+?)(?:\s+from|\s*$)',
+                ]
+                
+                for pattern in column_patterns:
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        columns_text = match.group(1).strip()
+                        
+                        # Clean up and standardize column names
+                        if 'and' in columns_text or ',' in columns_text:
+                            # Multiple columns
+                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
+                            cleaned_columns = []
+                            
+                            for col in columns_list:
+                                col = col.strip().lower().replace(' ', '_')
+                                # Map common variations
+                                if col in ['name', 'customer']:
+                                    cleaned_columns.append('customer_name')
+                                elif col in ['price', 'total', 'amount']:
+                                    cleaned_columns.append('total_price')
+                                elif col in ['product']:
+                                    cleaned_columns.append('product_name')
+                                elif col in ['date']:
+                                    cleaned_columns.append('sale_date')
+                                elif col in ['email']:
+                                    cleaned_columns.append('customer_email')
+                                else:
+                                    cleaned_columns.append(col)
+                            
+                            if cleaned_columns:
+                                args["columns"] = ','.join(cleaned_columns)
+                        else:
+                            # Single column
+                            col = columns_text.strip().lower().replace(' ', '_')
+                            if col in ['name', 'customer']:
+                                args["columns"] = 'customer_name'
+                            elif col in ['price', 'total', 'amount']:
+                                args["columns"] = 'total_price'
+                            elif col in ['product']:
+                                args["columns"] = 'product_name'
+                            elif col in ['date']:
+                                args["columns"] = 'sale_date'
+                            elif col in ['email']:
+                                args["columns"] = 'customer_email'
+                            else:
+                                args["columns"] = col
+                        break
+            
+            # Extract where_clause if not already extracted
+            if "where_clause" not in args:
+                import re
+                
+                # Look for filtering conditions
+                where_patterns = [
+                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
+                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:below|less\s+than|under|<)\s*\$?(\d+(?:\.\d+)?)',
+                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:equal[s]?|is|=)\s*\$?(\d+(?:\.\d+)?)',
+                    r'(?:with|where)\s+quantity[_\s]*(?:>|above|greater\s+than|more\s+than)\s*(\d+)',
+                    r'(?:with|where)\s+quantity[_\s]*(?:<|below|less\s+than|under)\s*(\d+)',
+                    r'(?:with|where)\s+quantity[_\s]*(?:=|equal[s]?|is)\s*(\d+)',
+                    r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
+                    r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
+                ]
+                
+                for i, pattern in enumerate(where_patterns):
+                    match = re.search(pattern, query, re.IGNORECASE)
+                    if match:
+                        value = match.group(1).strip()
+                        
+                        if i <= 2:  # total_price conditions
+                            if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
+                                args["where_clause"] = f"total_price > {value}"
+                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
+                                args["where_clause"] = f"total_price < {value}"
+                            else:
+                                args["where_clause"] = f"total_price = {value}"
+                        elif i <= 5:  # quantity conditions
+                            if 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
+                                args["where_clause"] = f"quantity > {value}"
+                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
+                                args["where_clause"] = f"quantity < {value}"
+                            else:
+                                args["where_clause"] = f"quantity = {value}"
+                        elif i == 6:  # customer name
+                            args["where_clause"] = f"customer_name = '{value}'"
+                        elif i == 7:  # product name
+                            args["where_clause"] = f"product_name = '{value}'"
+                        break
+            
+            result["args"] = args
+
+        # Validate and clean args
+        if "args" in result and isinstance(result["args"], dict):
+            cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
+            result["args"] = cleaned_args
+
+        # Validate tool selection
+        if "tool" in result and result["tool"] not in available_tools:
+            result["tool"] = list(available_tools.keys())[0]
+
+        # Debug output
+        print(f"DEBUG: Final parsed result for '{query}': {result}")
+
+        return result
+
+    except Exception as e:
+        return {
+            "tool": list(available_tools.keys())[0] if available_tools else None,
+            "action": "read",
+            "args": {},
+            "is_visualization": False,
+            "chart_type": None,
+            "error": f"Failed to parse query: {str(e)}"
+        }
+
+async def _invoke_tool(tool: str, action: str, args: dict) -> any:
+    transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}/mcp")
+    async with Client(transport) as client:
+        payload = {"operation": action, **{k: v for k, v in args.items() if k != "operation"}}
+        res_obj = await client.call_tool(tool, payload)
+    if res_obj.structured_content is not None:
+        return res_obj.structured_content
+    text = "".join(b.text for b in res_obj.content).strip()
+    if text.startswith("{") and "}{" in text:
+        text = "[" + text.replace("}{", "},{") + "]"
+    try:
+        return json.loads(text)
+    except:
+        return text
+
+def call_mcp_tool(tool: str, action: str, args: dict) -> any:
+    return asyncio.run(_invoke_tool(tool, action, args))
+
+def format_natural(data) -> str:
+    if isinstance(data, list):
+        lines = []
+        for i, item in enumerate(data, 1):
+            if isinstance(item, dict):
+                parts = [f"{k} {v}" for k, v in item.items()]
+                lines.append(f"Record {i}: " + ", ".join(parts) + ".")
+            else:
+                lines.append(f"{i}. {item}")
+        return "\n".join(lines)
+    if isinstance(data, dict):
+        parts = [f"{k} {v}" for k, v in data.items()]
+        return ", ".join(parts) + "."
+    return str(data)
+
+def normalize_args(args):
+    mapping = {
+        "product_name": "name",
+        "customer_name": "name",
+        "item": "name"
+    }
+    for old_key, new_key in mapping.items():
+        if old_key in args:
+            args[new_key] = args.pop(old_key)
+    return args
+
+def extract_name_from_query(text: str) -> str:
+    """Enhanced name extraction that handles various patterns"""
+    # Patterns for customer operations
+    customer_patterns = [
+        r'delete\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'remove\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'update\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'delete\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'remove\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)'
+    ]
+    
+    # Patterns for product operations
+    product_patterns = [
+        r'delete\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'remove\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'update\s+(?:price\s+of\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'change\s+price\s+of\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+        r'(?:price\s+of\s+)([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(?:to|=)'
+    ]
+    
+    all_patterns = customer_patterns + product_patterns
+    
+    for pattern in all_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    
+    return None
+
+def extract_email(text):
+    match = re.search(r'[\w\.-]+@[\w\.-]+', text)
+    return match.group(0) if match else None
+
+def extract_price(text):
+    # Look for price patterns like "to 25", "= 30.50", "$15.99"
+    price_patterns = [
+        r'to\s+\$?(\d+(?:\.\d+)?)',
+        r'=\s+\$?(\d+(?:\.\d+)?)',
+        r'\$(\d+(?:\.\d+)?)',
+        r'(\d+(?:\.\d+)?)\s*dollars?'
+    ]
+    
+    for pattern in price_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    
+    return None
+
+def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str) -> str:
+    """Generate LLM-based table description from JSON response data"""
+
+    # Sample first few rows for context (don't send all data to LLM)
+    sample_data = df.head(3).to_dict('records') if len(df) > 0 else []
+
+    # Create context for LLM
+    context = {
+        "action": action,
+        "tool": tool,
+        "record_count": len(df),
+        "columns": list(df.columns) if len(df) > 0 else [],
+        "sample_data": sample_data,
+        "full_response": content.get("result", [])[:3] if isinstance(content.get("result"), list) else content.get(
+            "result", "")
+    }
+
+    system_prompt = (
+        "You are a data analyst. Generate a brief, insightful 1-line description "
+        "of the table data based on the JSON response. Focus on what the data represents "
+        "and any interesting patterns you notice. Be concise and business-focused."
+    )
+
+    user_prompt = f"""
+    Analyze this table data and generate a single insightful line about it:
+
+    Context: {json.dumps(context, indent=2)}
+
+    Generate one line describing what this data represents and any key insights.
+    """
+
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+        response = groq_client.invoke(messages)
+        return response.content.strip()
+    except Exception as e:
+        return f"Retrieved {len(df)} records from the database."
 
 # ========== SIDEBAR NAVIGATION ==========
 with st.sidebar:
@@ -299,14 +1529,13 @@ with st.sidebar:
         # Dynamically choose default options for other selects
         # Option lists
         protocol_options = ["", "MCP Protocol", "A2A Protocol"]
-        # MODIFIED: Added Groq models
-        llm_options = ["", "GPT-4o", "GPT-4", "Claude 3 Sonnet", "Claude 3 Opus", "Groq - Llama3-8b-8192", "Groq - Llama3-70b-8192", "Groq - Mixtral-8x7b-32768"]
+        llm_options = ["", "Groq Llama3-70B", "Groq Llama3-8B", "Groq Mixtral-8x7B", "Groq Gemma"]
 
         # Logic to auto-select defaults if MCP Application is chosen
         protocol_index = protocol_options.index(
             "MCP Protocol") if application == "MCP Application" else protocol_options.index(
             st.session_state.get("protocol_select", ""))
-        llm_index = llm_options.index("Groq - Llama3-8b-8192") if application == "MCP Application" else llm_options.index( # Default to Groq
+        llm_index = llm_options.index("Groq Llama3-70B") if application == "MCP Application" else llm_options.index(
             st.session_state.get("llm_select", ""))
 
         protocol = st.selectbox(
@@ -329,7 +1558,7 @@ with st.sidebar:
             default_tool = list(st.session_state.available_tools.keys())[0] if st.session_state.available_tools else ""
             server_tools_index = server_tools_options.index(default_tool) if default_tool else 0
         else:
-            server_tools_options = ["", "sqlserver_crud", "postgresql_crud", "sales_crud"]  # Fallback
+            server_tools_options = ["", "sqlserver_crud", "postgresql_crud"]  # Fallback
             server_tools_index = 0
 
         server_tools = st.selectbox(
@@ -339,47 +1568,24 @@ with st.sidebar:
             index=server_tools_index
         )
 
-        # NEW: Dropdown for display options
-        display_options = [
-            "Default Formatting",
-            "Data Format Conversion",
-            "Decimal Value Formatting",
-            "String Concatenation",
-            "Null Value Removal/Handling"
-        ]
-        selected_display_option = st.selectbox(
-            "Display Options",
-            display_options,
-            key="display_option_select"
-        )
-
         st.button("Clear/Reset", key="clear_button")
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
+    logo_base64 = get_image_base64("Picture1.png")
     st.markdown(
-        """
-        <div class="sidebar-logo-row">
-            <img src="data:image/jpeg;base64,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" title="LLMATSCALE">
-            <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud">
-            <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud">
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
+    f"""
+    <div class="sidebar-logo-row">
+        <img src="https://media.licdn.com/dms/image/v2/D560BAQFIon13R1UG4g/company-logo_200_200/company-logo_200_200/0/1733990910443/llm_at_scale_logo?e=2147483647&v=beta&t=WtAgFOcGQuTS0aEIqZhNMzWraHwL6FU0z5EPyPrty04" title="Logo" style="width: 50px; height: 50px;">
+        <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/googlecloud/googlecloud-original.svg" title="Google Cloud" style="width: 50px; height: 50px;">
+        <img src="https://a0.awsstatic.com/libra-css/images/logos/aws_logo_smile_1200x630.png" title="AWS" style="width: 50px; height: 50px;">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/a/a8/Microsoft_Azure_Logo.svg" title="Azure Cloud" style="width: 50px; height: 50px;">
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-def get_image_base64(img_path):
-    img = Image.open(img_path)
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    img_bytes = buffered.getvalue()
-    img_base64 = base64.b64encode(img_bytes).decode()
-    return img_base64
-
-
-logo_path = "Logo.png"
+logo_path = "Picture1.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
@@ -406,14 +1612,14 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            MCP-Driven Data Management Implementation
+            MCP-Driven Data Management With Natural Language
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Agentic Platform: Leveraging MCP and LLMs for Secure CRUD Operations and Instant Analytics on SQL Server and PostgreSQL.
+            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL 
         </span>
         <hr style="
         width: 80%;
@@ -438,11 +1644,7 @@ if "available_tools" not in st.session_state:
 
 # Initialize MCP_SERVER_URL in session state
 if "MCP_SERVER_URL" not in st.session_state:
-    st.session_state["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") 
-
-# ADD THIS NEW LINE:
-st.sidebar.info(f"Client trying to connect to: {st.session_state['MCP_SERVER_URL']}")
-
+    st.session_state["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
 
 # Initialize tool_states dynamically based on discovered tools
 if "tool_states" not in st.session_state:
@@ -455,637 +1657,20 @@ if "menu_expanded" not in st.session_state:
 if "chat_input_box" not in st.session_state:
     st.session_state["chat_input_box"] = ""
 
-# NEW: State for conversational loop
-if "pending_tool_call" not in st.session_state:
-    st.session_state.pending_tool_call = None
-if "awaiting_input_for_field" not in st.session_state:
-    st.session_state.awaiting_input_for_field = None
-
-
-# ========== HELPER FUNCTIONS ==========
-def _clean_json(raw: str) -> str:
-    fences = re.findall(r"```", raw, re.DOTALL)
-    return fences[0].strip() if fences else raw.strip()
-
-
-# ========== NEW LLM RESPONSE GENERATOR ==========
-def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str, llm_model: str) -> str:
-    """Generate LLM response based on operation result with context"""
-
-    # Prepare context for LLM
-    context = {
-        "action": action,
-        "tool": tool,
-        "user_query": user_query,
-        "operation_result": operation_result
-    }
-
-    system_prompt = (
-   "You are an intelligent sales agent and database router for CRUD operations. "
-    "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
-
-    "AS A SALES AGENT, YOU SHOULD:\n"
-    "- Understand business context and customer needs\n"
-    "- Recognize sales-related queries (orders, transactions, revenue, customer purchases)\n"
-    "- Identify cross-database relationships (customer orders, product sales, inventory)\n"
-    "- Provide intelligent routing for business analytics and reporting needs\n"
-    "- Handle complex queries that may involve multiple data sources\n\n"
-
-    "RESPONSE FORMAT:\n"
-    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
-
-    "ACTION MAPPING:\n"
-    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-    "- 'create': for adding, inserting, or creating new records (orders, customers, products)\n"
-    "- 'update': for modifying, changing, or updating existing records\n"
-    "- 'delete': for removing, deleting, or destroying records\n"
-    "- 'describe': for showing table structure, schema, or column information\n\n"
-
-    "TOOL SELECTION GUIDELINES:\n"
-    "- Use `sales_crud` for any of the following:\n"
-    "  * Sales, transactions, orders, customer purchases, product sales, revenue\n"
-    "  * Phrases like 'record a sale', 'customer buys product', 'show sales', 'show sales of Alice and Bob'\n"
-    "  * Queries where both customers and products are mentioned but the focus is a transaction\n"
-    "- Use `sqlserver_crud` only for:\n"
-    "  * Customer-related queries (adding/updating/listing customer records)\n"
-    "  * Phrases like 'add customer', 'update email', 'list customers', 'find customers with name John'\n"
-    "- Use `postgresql_crud` only for:\n"
-    "  * Product management (name, price, description, category, launch date)\n"
-    "  * Phrases like 'add product', 'update product', 'product catalog', 'list product where price is 1000'\n\n"
-
-    "SALES-SPECIFIC ROUTING EXAMPLES:\n"
-    "- 'record sale for customer John buying 2 of product Widget' → `sales_crud`\n"
-    "- 'list all sales where quantity >= 3' → `sales_crud`\n"
-    "- 'create order for product X and customer Y' → `sales_crud`\n"
-    "- 'show all transactions this month' → `sales_crud`\n"
-    "- 'show sales of Alice and Bob' → `sales_crud`\n"
-    "- 'add customer John Doe' → `sqlserver_crud`\n"
-    "- 'show customer list' → `sqlserver_crud`\n"
-    "- 'add product iPhone for 1200.99' → `postgresql_crud`\n"
-    "- 'update product 5 price to 299.99' → `postgresql_crud`\n"
-    "- 'list product where price > 1000' → `postgresql_crud`\n"
-    "- 'list customers whose name is John' → `sqlserver_crud`\n\n"
-
-    "ARGUMENT EXTRACTION:\n"
-    "- `sales_crud`: supports `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`, or use `customer_name` and `product_name` if IDs are not available. Also supports `columns`, `where_clause`, `limit`\n"
-    "- `sqlserver_crud`: supports `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `columns`, `where_clause`, `limit`\n"
-    "- `postgresql_crud`: supports `name`, `price`, `description`, `product_id`, `category`, `launch_date`, `new_price`, `new_quantity`, `columns`, `where_clause`, `limit`\n\n"
-
-    "ETL GUIDANCE FOR LLM:\n"
-    "- Convert date formats like '31st July 2025' to '2025-07-31'\n"
-    "- Extract numeric values like price as float\n"
-    "- Split full names into first and last name if required\n"
-    "- If category is not given, let the server default to 'Uncategorized'\n\n"
-
-    "If in doubt, route to `sales_crud` when transactions or purchases are involved."
-)
-
-    user_prompt = f"""
-    Based on this database operation context, generate a brief natural response:
-
-    User asked: "{user_query}"
-    Operation: {action}
-    Tool used: {tool}
-    Result: {json.dumps(operation_result, indent=2)}
-
-    Generate a single line response explaining what was done and the outcome.
-    """
-
-    try:
-        if llm_model.startswith("Groq"):
-            groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-            model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
-            response = groq_client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=100
-            )
-        else: # Fallback to OpenAI if not Groq (or other future LLMs)
-            openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            response = openai_client.chat.completions.create(
-                model=llm_model.lower().replace(" ", "-"), # Adjust model name for OpenAI
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=100
-            )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        # Fallback response if LLM call fails
-        st.error(f"LLM Response Generation Error: {e}") # Display error for debugging
-        if action == "read":
-            return f"Successfully retrieved data from {tool}."
-        elif action == "create":
-            return f"Successfully created new record in {tool}."
-        elif action == "update":
-            return f"Successfully updated record in {tool}."
-        elif action == "delete":
-            return f"Successfully deleted record from {tool}."
-        elif action == "describe":
-            return f"Successfully retrieved table schema from {tool}."
-        else:
-            return f"Operation completed successfully using {tool}."
-
-
-def parse_user_query(query: str, available_tools: dict, llm_model: str) -> dict: # Added llm_model
-    """Parse user query with fully dynamic tool selection based on tool descriptions"""
-
-    if not available_tools:
-        return {"error": "No tools available"}
-
-    # Build comprehensive tool information for the LLM
-    tool_info = []
-    for tool_name, tool_desc in available_tools.items():
-        tool_info.append(f"- **{tool_name}**: {tool_desc}")
-
-    tools_description = "\n".join(tool_info)
-
-    system = (
-        "You are an intelligent sales agent and database router for CRUD operations. "
-        "Your job is to analyze the user's query and select the most appropriate tool based on the tool descriptions provided.\n\n"
-
-        "AS A SALES AGENT, YOU SHOULD:\n"
-        "- Understand business context and customer needs\n"
-        "- Recognize sales-related queries (orders, transactions, revenue, customer purchases)\n"
-        "- Identify cross-database relationships (customer orders, product sales, inventory)\n"
-        "- Provide intelligent routing for business analytics and reporting needs\n"
-        "- Handle complex queries that may involve multiple data sources\n\n"
-
-        "RESPONSE FORMAT:\n"
-        "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
-
-        "ACTION MAPPING:\n"
-        "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-        "- 'create': for adding, inserting, or creating new records (orders, customers, products)\n"
-        "- 'update': for modifying, changing, or updating existing records\n"
-        "- 'delete': for removing, deleting, or destroying records\n"
-        "- 'describe': for showing table structure, schema, or column information\n\n"
-
-        "TOOL SELECTION GUIDELINES:\n"
-        "- Analyze the user's business intent and match it with the most relevant tool description\n"
-        "- **Prioritize tools based on the primary data type being requested:**\n"
-        "  * **Customers:** Use `sqlserver_crud` for managing customer records (e.g., 'add customer', 'list customers', 'update customer email').\n"
-        "  * **Products:** Use `postgresql_crud` for managing product inventory and details (e.g., 'add product', 'list products', 'update product price').\n"
-        "  * **Sales Transactions:** Use `sales_crud` for recording, reading, updating, or deleting sales and order history. This tool interacts with both customer and product data to complete a sale (e.g., 'record a sale', 'list sales', 'update sale quantity').\n"
-        "- If a query involves both customer and product information but is primarily about a *transaction*, use `sales_crud`.\n"
-        "- If multiple tools could work, choose the most specific one for the business context.\n\n"
-
-        "SALES-SPECIFIC ROUTING:\n"
-        "- 'show sales', 'list transactions', 'revenue report' → Use `sales_crud`\n"
-        "- 'customer purchases', 'order history' → Use `sales_crud` with customer context\n"
-        "- 'product sales', 'top selling items' → Use `sales_crud` with product context\n"
-        "- 'create order', 'new sale' → Use `sales_crud`\n"
-        "- 'customer list', 'add customer', 'update customer email' → Use `sqlserver_crud`\n"
-        "- 'product catalog', 'inventory', 'add product', 'update product price' → Use `postgresql_crud`\n\n"
-
-        "ARGUMENT EXTRACTION:\n"
-        "- Extract relevant business parameters from the user query\n"
-        "- For `sqlserver_crud` (customers): Use `first_name`, `last_name`, `email`, `customer_id`, `new_email`, `new_first_name`, `new_last_name`.\n"
-        "- For `postgresql_crud` (products): Use `name`, `price`, `description`, `product_id`, `new_price`, `new_quantity`, `sales_amount`, `category`, `launch_date`, `new_category`, `new_launch_date`.\n"
-        "- For `sales_crud` (sales): Use `customer_id`, `product_id`, `quantity`, `unit_price`, `total_amount`, `sale_id`, `new_quantity`.\n"
-        "- For `describe`: include 'table_name' if mentioned (e.g., 'Customers', 'products', 'Sales').\n\n"
-        "- **ETL Scenario Guidance for LLM (for create/update operations):**\n"
-        "  - **Data Format Conversion (Dates):** If a date is provided (e.g., '31-07-2025', 'July 31st 2025'), extract it and format it as 'YYYY-MM-DD' for `launch_date` in `postgresql_crud`.\n"
-        "  - **Decimal Value Formatting:** Ensure `price`, `unit_price`, `total_amount` are extracted as floats. The server will handle rounding to 2 decimal places.\n"
-        "  - **String Concatenation (Names):** If a full customer name is provided (e.g., 'Jon Snow'), split it into `first_name` and `last_name` for `sqlserver_crud`. If only one name is given, use it as `first_name` and leave `last_name` empty.\n"
-        "  - **Null Value Handling (Category):** If a new product is added and no `category` is specified, do NOT provide a `category` argument. Let the server's default 'Uncategorized' apply. If the user explicitly states 'no category' or 'uncategorized', pass 'Uncategorized'.\n\n"
-
-
-        f"AVAILABLE TOOLS:\n{tools_description}\n\n"
-
-        "BUSINESS EXAMPLES:\n"
-        "Query: 'list all customers' → {\"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": {}}\n"
-        "Query: 'add customer John Doe with email john@example.com' → {\"tool\": \"sqlserver_crud\", \"action\": \"create\", \"args\": {\"first_name\": \"John\", \"last_name\": \"Doe\", \"email\": \"john@example.com\"}}\n"
-        "Query: 'show product inventory' → {\"tool\": \"postgresql_crud\", \"action\": \"read\", \"args\": {}}\n"
-        "Query: 'add product Laptop for $1200' → {\"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": {\"name\": \"Laptop\", \"price\": 1200.0}}\n"
-        "Query: 'display sales report' → {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {}}\n"
-        "Query: 'record a sale for customer 1 and product 2, quantity 5, unit price 14.99' → {\"tool\": \"sales_crud\", \"action\": \"create\", \"args\": {\"customer_id\": 1, \"product_id\": 2, \"quantity\": 5, \"unit_price\": 14.99}}\n"
-        "Query: 'update email for customer 1 to new@example.com' → {\"tool\": \"sqlserver_crud\", \"action\": \"update\", \"args\": {\"customer_id\": 1, \"new_email\": \"new@example.com\"}}\n"
-        "Query: 'update product 1 price to 10.50' → {\"tool\": \"postgresql_crud\", \"action\": \"update\", \"args\": {\"product_id\": 1, \"new_price\": 10.50}}\n"
-        "Query: 'update sale 1 quantity to 12' → {\"tool\": \"sales_crud\", \"action\": \"update\", \"args\": {\"sale_id\": 1, \"new_quantity\": 12}}\n"
-        "Query: 'Add a product called SmartWatch with price 299.99 and category Wearables launched on 2024-05-20' -> {\"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": {\"name\": \"SmartWatch\", \"price\": 299.99, \"category\": \"Wearables\", \"launch_date\": \"2024-05-20\"}}\n"
-        "Query: 'Add a product called EcoBike for 750.55' -> {\"tool\": \"postgresql_crud\", \"action\": \"create\", \"args\": {\"name\": \"EcoBike\", \"price\": 750.55}}\n"
-        "Query: 'Update product 1 launch date to 15-08-2023' -> {\"tool\": \"postgresql_crud\", \"action\": \"update\", \"args\": {\"product_id\": 1, \"new_launch_date\": \"2023-08-15\"}}\n"
-    )
-
-    prompt = f"User query: \"{query}\"\n\nAs a sales agent, analyze the query and select the most appropriate tool based on the descriptions above. Consider the business context and data relationships. Respond with JSON only."
-
-    try:
-        if llm_model.startswith("Groq"):
-            client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-            model_name = llm_model.split(" - ")[1] # Extract model name like "llama3-8b-8192"
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0,
-            )
-        else: # Fallback to OpenAI if not Groq (or other future LLMs)
-            openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            model_name = llm_model.lower().replace(" ", "-") # Adjust model name for OpenAI
-
-        resp = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-        )
-
-        raw = _clean_json(resp.choices[0].message.content)
-
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = ast.literal_eval(raw)
-
-        # Normalize action names
-        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
-            result["action"] = "read"
-
-        # Validate tool selection - if the LLM picks a non-existent tool, this will prevent errors
-        if "tool" in result and result["tool"] not in available_tools:
-            # Fallback or error handling for invalid tool selection
-            return {"error": f"LLM selected an invalid tool: '{result['tool']}'. Please refine your query.", "tool_selection_error": True}
-
-
-        return result
-
-    except Exception as e:
-        # Fallback response if LLM call fails
-        st.error(f"LLM Parsing Error: {e}") # Display error for debugging
-        return {
-            "tool": list(available_tools.keys())[0] if available_tools else None, # Fallback to first available tool
-            "action": "read",
-            "args": {},
-            "error": f"Failed to parse query: {str(e)}"
-        }
-
-
-async def _invoke_tool(tool: str, action: str, args: dict) -> any:
-    # Ensure the URL is correctly formed for MCP server endpoint
-    transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}")
-    async with Client(transport) as client:
-        payload = {"operation": action, **{k: v for k, v in args.items() if k != "operation"}}
-        # --- DEBUG PRINT ADDED HERE ---
-        st.write(f"DEBUG: Payload being sent to MCP tool '{tool}': {payload}")
-        # --- END DEBUG PRINT ---
-        res_obj = await client.call_tool(tool, payload)
-    if res_obj.structured_content is not None:
-        return res_obj.structured_content
-    text = "".join(b.text for b in res_obj.content).strip()
-    if text.startswith("{") and "}{" in text:
-        text = "[" + text.replace("}{", "},{") + "]"
-    try:
-        return json.loads(text)
-    except:
-        return text
-
-
-def call_mcp_tool(tool: str, action: str, args: dict) -> any:
-    return asyncio.run(_invoke_tool(tool, action, args))
-
-
-def format_natural(data, display_option: str = "Default Formatting") -> str:
-    """
-    Formats the data for natural language display based on the selected display option.
-    Applies ETL-like transformations for display purposes.
-    """
-    if isinstance(data, list):
-        processed_items = []
-        for item in data:
-            if isinstance(item, dict):
-                formatted_item = item.copy() # Work on a copy
-                
-                # --- Apply ETL Scenarios for Display ---
-                if display_option == "Data Format Conversion":
-                    # Convert dates to readable format
-                    if "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], datetime):
-                        formatted_item["sale_date"] = formatted_item["sale_date"].strftime("%Y-%m-%d %H:%M:%S")
-                    elif "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], str):
-                         try:
-                             dt_obj = datetime.fromisoformat(formatted_item["sale_date"])
-                             formatted_item["sale_date"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
-                         except ValueError:
-                             pass # Keep as is if not a valid ISO format
-                    
-                    if "product_launch_date" in formatted_item and isinstance(formatted_item["product_launch_date"], str):
-                        try:
-                            # Assuming server sends ISO format 'YYYY-MM-DD' for date
-                            date_obj = datetime.strptime(formatted_item["product_launch_date"], "%Y-%m-%d").date()
-                            formatted_item["product_launch_date"] = date_obj.strftime("%d-%m-%Y") # Convert to DD-MM-YYYY
-                        except ValueError:
-                            pass # Keep original string if conversion fails
-                    
-                    if "CreatedAt" in formatted_item and isinstance(formatted_item["CreatedAt"], str):
-                        try:
-                            dt_obj = datetime.fromisoformat(formatted_item["CreatedAt"])
-                            formatted_item["CreatedAt"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
-                        except ValueError:
-                            pass # Keep as is if not a valid ISO format
-
-                elif display_option == "Decimal Value Formatting":
-                    for key in ["price", "unit_price", "total_price", "sales_amount"]:
-                        if key in formatted_item and (isinstance(formatted_item[key], (float, Decimal, int))):
-                            try:
-                                formatted_item[key] = f"{Decimal(str(formatted_item[key])):.2f}"
-                            except InvalidOperation:
-                                pass # Keep as is if not a valid number
-                
-                elif display_option == "String Concatenation":
-                    # FullName is now a generated column from DB, so it should already be there for customers
-                    if "FirstName" in formatted_item and "LastName" in formatted_item and "FullName" not in formatted_item:
-                        formatted_item["FullName"] = f"{formatted_item['FirstName']} {formatted_item['LastName']}".strip()
-                        formatted_item.pop("FirstName", None)
-                        formatted_item.pop("LastName", None)
-                    
-                    if "product_name" in formatted_item and "product_description_raw" in formatted_item and "product_category" in formatted_item:
-                        formatted_item["product_full_description"] = (
-                            f"{formatted_item['product_name']} "
-                            f"({formatted_item['product_description_raw'] or 'No description'}) "
-                            f"[Category: {formatted_item['product_category'] or 'N/A'}]"
-                        )
-                        formatted_item.pop("product_description_raw", None)
-                        formatted_item.pop("product_category", None)
-                    
-                    if "customer_full_name" in formatted_item and "product_name" in formatted_item and "quantity" in formatted_item and "total_price" in formatted_item and "sale_date" in formatted_item:
-                        sale_date_str = formatted_item["sale_date"].strftime("%Y-%m-%d") if isinstance(formatted_item["sale_date"], datetime) else str(formatted_item["sale_date"])
-                        formatted_item["sale_summary"] = (
-                            f"{formatted_item['customer_full_name']} bought {formatted_item['quantity']} of "
-                            f"{formatted_item['product_name']} for ${formatted_item['total_price']:.2f} on {sale_date_str}"
-                        )
-
-                elif display_option == "Null Value Removal/Handling":
-                    # Remove entries with None/null email for sales or customers
-                    if "customer_email" in formatted_item and (formatted_item["customer_email"] is None or formatted_item["customer_email"] == "N/A"):
-                        continue # Skip this record
-                    
-                    # Replace None/null descriptions or categories with 'N/A' or 'Uncategorized' for display
-                    if "product_description_raw" in formatted_item and formatted_item["product_description_raw"] is None:
-                        formatted_item["product_description_raw"] = "N/A"
-                    if "product_category" in formatted_item and formatted_item["product_category"] is None:
-                        formatted_item["product_category"] = "Uncategorized"
-                    if "launch_date" in formatted_item and formatted_item["launch_date"] is None:
-                        formatted_item["launch_date"] = "N/A"
-                    if "description" in formatted_item and formatted_item["description"] is None:
-                        formatted_item["description"] = "N/A"
-                    if "Email" in formatted_item and formatted_item["Email"] is None:
-                        formatted_item["Email"] = "N/A"
-
-
-                # Construct string representation of the formatted item
-                parts = []
-                for k, v in formatted_item.items():
-                    # Skip raw first/last name if full_name is present
-                    if k in ["first_name", "last_name"] and "customer_full_name" in formatted_item:
-                        continue
-                    # Skip raw product description/category if product_full_description is present
-                    if k in ["product_description_raw", "product_category"] and "product_full_description" in formatted_item:
-                        continue
-                    
-                    if k == "sale_date" and isinstance(v, datetime):
-                        parts.append(f"Sale Date: {v.strftime('%Y-%m-%d %H:%M:%S')}")
-                    elif k == "product_launch_date" and isinstance(v, (datetime, date)):
-                        parts.append(f"Launch Date: {v.strftime('%Y-%m-%d')}")
-                    elif k == "product_launch_date" and isinstance(v, str): # For already converted strings
-                        parts.append(f"Launch Date: {v}")
-                    elif k == "CreatedAt" and isinstance(v, (datetime, date)):
-                        parts.append(f"Created At: {v.strftime('%Y-%m-%d %H:%M:%S')}")
-                    elif k == "CreatedAt" and isinstance(v, str): # For already converted strings
-                        parts.append(f"Created At: {v}")
-                    elif k == "unit_price" or k == "total_price" or k == "sales_amount" or k == "price":
-                        if isinstance(v, (float, Decimal, int)):
-                            parts.append(f"{k.replace('_', ' ').title()}: ${v:.2f}")
-                        else: # Already formatted string
-                            parts.append(f"{k.replace('_', ' ').title()}: ${v}")
-                    elif k == "email":
-                        parts.append(f"Email: {v or 'N/A'}")
-                    elif k == "description" or k == "product_description_raw":
-                        parts.append(f"Description: {v or 'N/A'}")
-                    elif k == "category" or k == "product_category":
-                        parts.append(f"Category: {v or 'Uncategorized'}")
-                    elif k == "full_name" or k == "customer_full_name":
-                        parts.append(f"Customer: {v}")
-                    elif k == "product_full_description":
-                        parts.append(f"Product: {v}")
-                    elif k == "sale_summary":
-                        parts.append(f"Summary: {v}")
-                    else:
-                        parts.append(f"{k.replace('_', ' ').title()}: {v}")
-                processed_items.append(", ".join(parts))
-            else:
-                processed_items.append(str(item))
-        return "\n".join(processed_items)
-    elif isinstance(data, dict):
-        # Apply formatting for single dictionary (e.g., describe results)
-        formatted_item = data.copy()
-        
-        # Apply ETL Scenarios for Display (similar to list, but for single item)
-        if display_option == "Data Format Conversion":
-            if "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], datetime):
-                formatted_item["sale_date"] = formatted_item["sale_date"].strftime("%Y-%m-%d %H:%M:%S")
-            elif "sale_date" in formatted_item and isinstance(formatted_item["sale_date"], str):
-                try:
-                    dt_obj = datetime.fromisoformat(formatted_item["sale_date"])
-                    formatted_item["sale_date"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    pass
-            if "product_launch_date" in formatted_item and isinstance(formatted_item["product_launch_date"], str):
-                try:
-                    date_obj = datetime.strptime(formatted_item["product_launch_date"], "%Y-%m-%d").date()
-                    formatted_item["product_launch_date"] = date_obj.strftime("%d-%m-%Y")
-                except ValueError:
-                    pass
-            if "CreatedAt" in formatted_item and isinstance(formatted_item["CreatedAt"], str):
-                try:
-                    dt_obj = datetime.fromisoformat(formatted_item["CreatedAt"])
-                    formatted_item["CreatedAt"] = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    pass
-
-        elif display_option == "Decimal Value Formatting":
-            for key in ["price", "unit_price", "total_price", "sales_amount"]:
-                if key in formatted_item and (isinstance(formatted_item[key], (float, Decimal, int))):
-                    try:
-                        formatted_item[key] = f"{Decimal(str(formatted_item[key])):.2f}"
-                    except InvalidOperation:
-                        pass
-        elif display_option == "String Concatenation":
-            if "FirstName" in formatted_item and "LastName" in formatted_item and "FullName" not in formatted_item:
-                formatted_item["FullName"] = f"{formatted_item['FirstName']} {formatted_item['LastName']}".strip()
-                formatted_item.pop("FirstName", None)
-                formatted_item.pop("LastName", None)
-            if "product_name" in formatted_item and "product_description_raw" in formatted_item and "product_category" in formatted_item:
-                formatted_item["product_full_description"] = (
-                    f"{formatted_item['product_name']} "
-                    f"({formatted_item['product_description_raw'] or 'No description'}) "
-                    f"[Category: {formatted_item['product_category'] or 'N/A'}]"
-                )
-                formatted_item.pop("product_description_raw", None)
-                formatted_item.pop("product_category", None)
-            if "customer_full_name" in formatted_item and "product_name" in formatted_item and "quantity" in formatted_item and "total_price" in formatted_item and "sale_date" in formatted_item:
-                sale_date_str = formatted_item["sale_date"].strftime("%Y-%m-%d") if isinstance(formatted_item["sale_date"], datetime) else str(formatted_item["sale_date"])
-                formatted_item["sale_summary"] = (
-                    f"{formatted_item['customer_full_name']} bought {formatted_item['quantity']} of "
-                    f"{formatted_item['product_name']} for ${formatted_item['total_price']:.2f} on {sale_date_str}"
-                )
-        elif display_option == "Null Value Removal/Handling":
-            if "customer_email" in formatted_item and (formatted_item["customer_email"] is None or formatted_item["customer_email"] == "N/A"):
-                pass # This format is for filtering lists, not single items.
-            if "product_description_raw" in formatted_item and formatted_item["product_description_raw"] is None:
-                formatted_item["product_description_raw"] = "N/A"
-            if "product_category" in formatted_item and formatted_item["product_category"] is None:
-                formatted_item["product_category"] = "Uncategorized"
-            if "launch_date" in formatted_item and formatted_item["launch_date"] is None:
-                formatted_item["launch_date"] = "N/A"
-            if "description" in formatted_item and formatted_item["description"] is None:
-                formatted_item["description"] = "N/A"
-            if "Email" in formatted_item and formatted_item["Email"] is None:
-                formatted_item["Email"] = "N/A"
-
-
-        parts = []
-        for k, v in formatted_item.items():
-            if k in ["first_name", "last_name"] and "customer_full_name" in formatted_item:
-                continue
-            if k in ["product_description_raw", "product_category"] and "product_full_description" in formatted_item:
-                continue
-
-            if k == "sale_date" and isinstance(v, datetime):
-                parts.append(f"Sale Date: {v.strftime('%Y-%m-%d %H:%M:%S')}")
-            elif k == "product_launch_date" and isinstance(v, (datetime, date)):
-                parts.append(f"Launch Date: {v.strftime('%Y-%m-%d')}")
-            elif k == "product_launch_date" and isinstance(v, str):
-                parts.append(f"Launch Date: {v}")
-            elif k == "CreatedAt" and isinstance(v, (datetime, date)):
-                parts.append(f"Created At: {v.strftime('%Y-%m-%d %H:%M:%S')}")
-            elif k == "CreatedAt" and isinstance(v, str):
-                parts.append(f"Created At: {v}")
-            elif k == "unit_price" or k == "total_price" or k == "sales_amount" or k == "price":
-                if isinstance(v, (float, Decimal, int)):
-                    parts.append(f"{k.replace('_', ' ').title()}: ${v:.2f}")
-                else:
-                    parts.append(f"{k.replace('_', ' ').title()}: ${v}")
-            elif k == "email":
-                parts.append(f"Email: {v or 'N/A'}")
-            elif k == "description" or k == "product_description_raw":
-                parts.append(f"Description: {v or 'N/A'}")
-            elif k == "category" or k == "product_category":
-                parts.append(f"Category: {v or 'Uncategorized'}")
-            elif k == "full_name" or k == "customer_full_name":
-                parts.append(f"Customer: {v}")
-            elif k == "product_full_description":
-                parts.append(f"Product: {v}")
-            elif k == "sale_summary":
-                parts.append(f"Summary: {v}")
-            else:
-                parts.append(f"{k.replace('_', ' ').title()}: {v}")
-        return ", ".join(parts) + "."
-    return str(data)
-
-
-def normalize_args(args):
-    # This function is now less critical as LLM prompt guides direct arg extraction
-    # but kept for any potential edge cases or future needs.
-    return args
-
-
-# Define required arguments for create operations for conversational loop
-REQUIRED_ARGS_FOR_CREATE = {
-    "sqlserver_crud": ["first_name", "last_name"],
-    "postgresql_crud": ["name", "price"],
-    "sales_crud": ["customer_id", "product_id", "quantity", "unit_price"]
-}
-
-# Define how to extract missing info from a follow-up query
-FIELD_EXTRACTION_MAP = {
-    "first_name": lambda q: re.search(r'(?:first name is|first name)\s+([a-zA-Z]+)', q, re.IGNORECASE),
-    "last_name": lambda q: re.search(r'(?:last name is|last name)\s+([a-zA-Z]+)', q, re.IGNORECASE),
-    "email": lambda q: re.search(r'email\s+([\w\.-]+@[\w\.-]+)', q, re.IGNORECASE),
-    "name": lambda q: re.search(r'(?:name is|name)\s+([a-zA-Z0-9\s]+)', q, re.IGNORECASE),
-    "price": lambda q: re.search(r'(?:price is|price)\s+\$?(\d+(?:\.\d+)?)', q, re.IGNORECASE),
-    "quantity": lambda q: re.search(r'(?:quantity is|quantity)\s+(\d+)', q, re.IGNORECASE),
-    "unit_price": lambda q: re.search(r'(?:unit price is|unit price)\s+\$?(\d+(?:\.\d+)?)', q, re.IGNORECASE),
-    "category": lambda q: re.search(r'(?:category is|category)\s+([a-zA-Z\s]+)', q, re.IGNORECASE),
-    "launch_date": lambda q: re.search(r'(?:launch date is|launched on)\s+(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})', q, re.IGNORECASE),
-    "customer_id": lambda q: re.search(r'(?:customer id is|customer id)\s+(\d+)', q, re.IGNORECASE),
-    "product_id": lambda q: re.search(r'(?:product id is|product id)\s+(\d+)', q, re.IGNORECASE),
-}
-
-
-def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str, llm_model: str) -> str: # Added llm_model
-    """Generate LLM-based table description from JSON response data"""
-
-    # Sample first few rows for context (don't send all data to LLM)
-    sample_data = df.head(3).to_dict('records') if len(df) > 0 else []
-
-    # Create context for LLM
-    context = {
-        "action": action,
-        "tool": tool,
-        "record_count": len(df),
-        "columns": list(df.columns) if len(df) > 0 else [],
-        "sample_data": sample_data,
-        "full_response": content.get("result", [])[:3] if isinstance(content.get("result"), list) else content.get(
-            "result", "")
-    }
-
-    system_prompt = (
-        "You are a data analyst. Generate a brief, insightful 1-line description "
-        "of the table data based on the JSON response. Focus on what the data represents "
-        "and any interesting patterns you notice. Be concise and business-focused."
-    )
-
-    prompt = f"""
-    Analyze this table data and generate a single insightful line about it:
-
-    Context: {json.dumps(context, indent=2)}
-
-    Generate one line describing what this data represents and any key insights.
-    """
-
-    try:
-        if llm_model.startswith("Groq"):
-            client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-            model_name = llm_model.split(" - ")[1] # Extract model name
-        else:
-            # Ensure OpenAI API key is available if an OpenAI model is selected
-            if not os.getenv("OPENAI_API_KEY"):
-                raise ValueError("OPENAI_API_KEY environment variable not set.")
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            model_name = llm_model.lower().replace(" ", "-") # Adjust model name
-
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=80
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        st.error(f"LLM Table Description Error: {e}") # Display error for debugging
-        return f"Retrieved {len(df)} records from the database."
-
-
 # ========== MAIN ==========
 if application == "MCP Application":
-    user_avatar_url = "[https://cdn-icons-png.flaticon.com/512/1946/1946429.png](https://cdn-icons-png.flaticon.com/512/1946/1946429.png)"
-    agent_avatar_url = "[https://cdn-icons-png.flaticon.com/512/4712/4712039.png](https://cdn-icons-png.flaticon.com/512/4712/4712039.png)"
+    user_avatar_url = "https://cdn-icons-png.flaticon.com/512/1946/1946429.png"
+    agent_avatar_url = "https://cdn-icons-png.flaticon.com/512/4712/4712039.png"
 
-    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") 
+    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
     st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
+
+    # Discover tools dynamically if not already done
+    if not st.session_state.available_tools:
+        with st.spinner("Discovering available tools..."):
+            discovered_tools = discover_tools()
+            st.session_state.available_tools = discovered_tools
+            st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
 
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
@@ -1105,9 +1690,9 @@ if application == "MCP Application":
     with col2:
         # Small refresh button on main page
         st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
-        if st.button("🔄 Refresh", key="refresh_tools_main", help="Rediscover available tools"):
+        if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
             with st.spinner("Refreshing tools..."):
-                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000/mcp") 
+                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
                 st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
                 discovered_tools = discover_tools()
                 st.session_state.available_tools = discovered_tools
@@ -1115,7 +1700,7 @@ if application == "MCP Application":
                 st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== 1. RENDER CHAT MESSAGES ==========
+    # ========== 1. RENDER CHAT MESSAGES WITH VISUALIZATION SUPPORT ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
     for msg in st.session_state.messages:
         if msg["role"] == "user":
@@ -1128,6 +1713,29 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
+        elif msg.get("format") == "visualization":
+            # Handle visualization messages
+            viz_result = msg["content"]
+            user_query = msg.get("user_query", "")
+            chart_type = msg.get("chart_type", "unknown")
+            
+            # Show AI response about creating visualization
+            st.markdown(
+                f"""
+                <div class="chat-row left">
+                    <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
+                    <div class="chat-bubble agent-msg agent-bubble">
+                        🎨 I've created a <strong>{chart_type}</strong> chart visualization for your data. 
+                        {f"Found {viz_result.get('data_count', 0)} records to analyze." if viz_result.get('data_count') else ""}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            
+            # Render the visualization section
+            render_visualization_section(viz_result, user_query)
+            
         elif msg.get("format") == "reasoning":
             st.markdown(
                 f"""
@@ -1171,8 +1779,6 @@ if application == "MCP Application":
             action = msg.get("action", "")
             tool = msg.get("tool", "")
             user_query = msg.get("user_query", "")
-            current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") 
-            selected_display_option = st.session_state.get("display_option_select", "Default Formatting")
 
             with st.expander("Details"):
                 if "request" in msg:
@@ -1188,8 +1794,8 @@ if application == "MCP Application":
                 else:
                     st.code(content["result"])
 
-            # Generate LLM response for the operation, passing the selected LLM model
-            llm_response = generate_llm_response(content, action, tool, user_query, current_llm_model)
+            # Generate LLM response for the operation
+            llm_response = generate_llm_response(content, action, tool, user_query)
 
             st.markdown(
                 f"""
@@ -1214,62 +1820,79 @@ if application == "MCP Application":
                     read_args = {}
                     updated_table = call_mcp_tool(read_tool, "read", read_args)
                     if isinstance(updated_table, dict) and "result" in updated_table:
-                        # Apply formatting to the displayed table
-                        # Filter out records with null email if Null Value Removal/Handling is selected
-                        filtered_data = []
-                        for row in updated_table["result"]:
-                            if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
-                                continue
-                            if selected_display_option == "Null Value Removal/Handling" and "Email" in row and (row["Email"] is None or row["Email"] == "N/A"):
-                                continue
-                            filtered_data.append(row)
-
-                        # Now apply formatting to the filtered data
-                        formatted_table_data = []
-                        for row in filtered_data:
-                            try:
-                                # ast.literal_eval expects a string representation of a Python literal (like a dict or list)
-                                # format_natural returns a string like "Key: Value, Key2: Value2"
-                                # We need to convert this back to a dict for DataFrame, so we need to parse it.
-                                # A simple way is to make it look like a dict string and then eval it.
-                                # This is a bit hacky, but given the current format_natural output, it's a workaround.
-                                # A better long-term solution would be for format_natural to return a dict directly for table display.
-                                formatted_str = format_natural(row, selected_display_option)
-                                # Convert "Key: Value, Key2: Value2" into "{'Key': 'Value', 'Key2': 'Value2'}"
-                                # This is a fragile conversion, assuming no commas or colons within values themselves.
-                                temp_dict_str = "{" + ", ".join([f"'{p.split(': ', 1)[0]}': '{p.split(': ', 1)[1]}'" for p in formatted_str.split(', ')]) + "}"
-                                formatted_table_data.append(ast.literal_eval(temp_dict_str))
-                            except Exception as e:
-                                st.warning(f"Failed to parse formatted row for table display: {e}. Original formatted string: {formatted_str}")
-                                formatted_table_data.append(row) # Fallback to raw row
-
-                        updated_df = pd.DataFrame(formatted_table_data)
+                        updated_df = pd.DataFrame(updated_table["result"])
                         st.table(updated_df)
                 except Exception as fetch_err:
                     st.info(f"Could not retrieve updated table: {fetch_err}")
 
             if action == "read" and isinstance(content["result"], list):
                 st.markdown("#### Here's the current table:")
-                # Apply formatting to the displayed table
-                formatted_table_data = []
-                for row in content["result"]:
-                    # Null Value Removal/Handling for read operations (filtering)
-                    if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
-                        continue
-                    if selected_display_option == "Null Value Removal/Handling" and "Email" in row and (row["Email"] is None or row["Email"] == "N/A"):
-                        continue
-                    
-                    try:
-                        formatted_str = format_natural(row, selected_display_option)
-                        temp_dict_str = "{" + ", ".join([f"'{p.split(': ', 1)[0]}': '{p.split(': ', 1)[1]}'" for p in formatted_str.split(', ')]) + "}"
-                        formatted_table_data.append(ast.literal_eval(temp_dict_str))
-                    except Exception as e:
-                        st.warning(f"Failed to parse formatted row for table display: {e}. Original formatted string: {formatted_str}")
-                        formatted_table_data.append(row) # Fallback to raw row
-                
-                df = pd.DataFrame(formatted_table_data)
+                df = pd.DataFrame(content["result"])
                 st.table(df)
-                st.markdown(f"The table contains {len(df)} records with '{selected_display_option}' applied.")
+                
+                # Add quick visualization option for data tables
+                if len(df) > 0:
+                    with st.expander("📊 Quick Visualization Options"):
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            if st.button("📊 Bar Chart", key=f"bar_{hash_text(str(content))}"):
+                                # Create quick bar chart
+                                quick_viz_query = f"create a bar chart from this {tool.replace('_crud', '')} data"
+                                st.session_state.quick_viz_request = {
+                                    "query": quick_viz_query,
+                                    "data": content["result"],
+                                    "tool": tool,
+                                    "chart_type": "bar"
+                                }
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("📈 Line Chart", key=f"line_{hash_text(str(content))}"):
+                                quick_viz_query = f"create a line chart from this {tool.replace('_crud', '')} data"
+                                st.session_state.quick_viz_request = {
+                                    "query": quick_viz_query,
+                                    "data": content["result"],
+                                    "tool": tool,
+                                    "chart_type": "line"
+                                }
+                                st.rerun()
+                        
+                        with col3:
+                            if st.button("🥧 Pie Chart", key=f"pie_{hash_text(str(content))}"):
+                                quick_viz_query = f"create a pie chart from this {tool.replace('_crud', '')} data"
+                                st.session_state.quick_viz_request = {
+                                    "query": quick_viz_query,
+                                    "data": content["result"],
+                                    "tool": tool,
+                                    "chart_type": "pie"
+                                }
+                                st.rerun()
+                
+                # Check if this is ETL formatted data by looking for specific formatting
+                if tool == "sales_crud" and len(df.columns) > 0:
+                    # Check for different ETL formats based on column names
+                    if "sale_summary" in df.columns:
+                        st.info("📊 Data formatted with String Concatenation - Combined fields for readability")
+                    elif "sale_date" in df.columns and isinstance(df["sale_date"].iloc[0] if len(df) > 0 else None,
+                                                                  str):
+                        st.info("📅 Data formatted with Data Format Conversion - Dates converted to string format")
+                    elif any(
+                            "." in str(val) and len(str(val).split(".")[-1]) == 2 for val in df.get("unit_price", []) if
+                            pd.notna(val)):
+                        st.info("💰 Data formatted with Decimal Value Formatting - Prices formatted to 2 decimal places")
+                    else:
+                        st.markdown(f"The table contains {len(df)} sales records with cross-database information.")
+                elif tool == "sqlserver_crud":
+                    st.markdown(
+                        f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps."
+                    )
+                elif tool == "postgresql_crud":
+                    st.markdown(
+                        f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions."
+                    )
+                else:
+                    st.markdown(f"The table contains {len(df)} records.")
             elif action == "describe" and isinstance(content['result'], list):
                 st.markdown("#### Table Schema: ")
                 df = pd.DataFrame(content['result'])
@@ -1286,6 +1909,36 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
+
+    # Handle quick visualization requests
+    if "quick_viz_request" in st.session_state:
+        quick_viz = st.session_state.quick_viz_request
+        
+        # Process the quick visualization
+        fake_parsed = {
+            "tool": quick_viz["tool"],
+            "action": "visualize",
+            "is_visualization": True,
+            "chart_type": quick_viz["chart_type"],
+            "args": {}
+        }
+        
+        with st.spinner("🎨 Creating visualization..."):
+            viz_result = asyncio.run(handle_visualization_request(fake_parsed, quick_viz["query"]))
+        
+        # Add visualization message
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": viz_result,
+            "format": "visualization", 
+            "chart_type": quick_viz["chart_type"],
+            "user_query": quick_viz["query"]
+        })
+        
+        # Clear the request and rerun
+        del st.session_state.quick_viz_request
+        st.rerun()
+
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
     # ========== 2. CLAUDE-STYLE STICKY CHAT BAR ==========
@@ -1300,9 +1953,9 @@ if application == "MCP Application":
         # --- MIDDLE: Input Box ---
         with chatbar_cols[1]:
             user_query_input = st.text_input(
-                "",
+                "Chat Input",  # Provide a label
                 placeholder="How can I help you today?",
-                label_visibility="collapsed",
+                label_visibility="collapsed",  # Hide the label visually
                 key="chat_input_box"
             )
 
@@ -1327,91 +1980,25 @@ if application == "MCP Application":
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== PROCESS CHAT INPUT ==========
+    # ========== HANDLE HAMBURGER ==========
+    if hamburger_clicked:
+        st.session_state["show_menu"] = not st.session_state.get("show_menu", False)
+        st.rerun()
+
+    # ========== PROCESS CHAT INPUT WITH VISUALIZATION SUPPORT ==========
     if send_clicked and user_query_input:
         user_query = user_query_input
         user_steps = []
-        current_llm_model = st.session_state.get("llm_select", "Groq - Llama3-8b-8192") 
-        selected_display_option = st.session_state.get("display_option_select", "Default Formatting")
-
-        # Handle conversational loop for missing fields
-        if st.session_state.pending_tool_call and st.session_state.awaiting_input_for_field:
-            field_name = st.session_state.awaiting_input_for_field
-            extracted_value = None
-
-            # Attempt to extract the value for the pending field from the new user query
-            if field_name == "first_name" or field_name == "last_name":
-                # Special handling for full name input
-                name_parts = user_query.strip().split(maxsplit=1)
-                if len(name_parts) == 2:
-                    st.session_state.pending_tool_call["args"]["first_name"] = name_parts[0]
-                    st.session_state.pending_tool_call["args"]["last_name"] = name_parts[1]
-                    extracted_value = True # Indicate success
-                elif len(name_parts) == 1:
-                    st.session_state.pending_tool_call["args"]["first_name"] = name_parts[0]
-                    st.session_state.pending_tool_call["args"]["last_name"] = "" # Empty last name
-                    extracted_value = True
-            else:
-                extractor = FIELD_EXTRACTION_MAP.get(field_name)
-                if extractor:
-                    match = extractor(user_query)
-                    if match:
-                        extracted_value = match.group(1)
-                        if field_name in ["price", "quantity", "unit_price"]:
-                            try:
-                                extracted_value = float(extracted_value)
-                            except ValueError:
-                                extracted_value = None # Failed to convert to number
-                        # Handle date format for launch_date if it's the pending field
-                        if field_name == "launch_date" and extracted_value:
-                            try:
-                                # Convert DD-MM-YYYY to YYYY-MM-DD for server
-                                if re.match(r'\d{2}-\d{2}-\d{4}', extracted_value):
-                                    day, month, year = extracted_value.split('-')
-                                    extracted_value = f"{year}-{month}-{day}"
-                            except Exception:
-                                pass # Keep original if conversion fails
-                        st.session_state.pending_tool_call["args"][field_name] = extracted_value
-
-            if extracted_value is not None:
-                # Clear pending state and proceed with the stored tool call
-                p = st.session_state.pending_tool_call
-                st.session_state.pending_tool_call = None
-                st.session_state.awaiting_input_for_field = None
-                st.session_state.messages.append({
-                    "role": "user",
-                    "content": user_query,
-                    "format": "text",
-                })
-                # Now try to execute the tool call
-                try_execute_tool_call(p, user_query, current_llm_model, selected_display_option)
-                st.rerun()
-            else:
-                st.session_state.messages.append({
-                    "role": "user",
-                    "content": user_query,
-                    "format": "text",
-                })
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": f"I still need the '{field_name.replace('_', ' ')}'. Please provide it clearly.",
-                    "format": "text",
-                })
-                st.rerun()
-            return # Exit to avoid re-parsing the query
-
-        # If not in a pending state, parse the new query
+        
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
             if not enabled_tools:
                 raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
 
-            p = parse_user_query(user_query, st.session_state.available_tools, current_llm_model)
-            
-            if "error" in p and p.get("tool_selection_error"):
-                raise Exception(p["error"])
-
+            # Parse the user query with visualization detection
+            p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
+            
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
             if tool not in st.session_state.available_tools:
@@ -1420,129 +2007,152 @@ if application == "MCP Application":
 
             action = p.get("action")
             args = p.get("args", {})
-            p["args"] = args
+            is_visualization = p.get("is_visualization", False)
+            chart_type = p.get("chart_type")
 
-            # Special handling for customer_name to split into first_name and last_name
-            if tool == "sqlserver_crud" and action == "create":
-                if "name" in args: # If user provides full name for create
-                    customer_full_name = args.pop("name")
-                    name_parts = customer_full_name.split(maxsplit=1)
-                    args["first_name"] = name_parts[0]
-                    args["last_name"] = name_parts[1] if len(name_parts) > 1 else ""
-                    p["args"] = args
+            # Add user message to chat
+            st.session_state.messages.append({
+                "role": "user",
+                "content": user_query,
+                "format": "text",
+            })
 
-            # Validate required fields for 'create' operations
-            if action == "create" and tool in REQUIRED_ARGS_FOR_CREATE:
-                missing_fields = [field for field in REQUIRED_ARGS_FOR_CREATE[tool] if field not in args or args[field] is None]
-                if missing_fields:
-                    # Store the incomplete tool call
-                    st.session_state.pending_tool_call = p
-                    st.session_state.awaiting_input_for_field = missing_fields[0] # Ask for the first missing field
-                    
-                    st.session_state.messages.append({
-                        "role": "user",
-                        "content": user_query,
-                        "format": "text",
-                    })
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"I need more information to {action} a {tool.replace('_crud', '').replace('sqlserver', 'customer').replace('postgresql', 'product')}. Please provide the '{missing_fields[0].replace('_', ' ')}'.",
-                        "format": "text",
-                    })
-                    st.rerun()
-                    return # Exit to wait for next input
-
-            # SQL Server: update by name
-            if tool == "sqlserver_crud" and action == "update":
-                if "name" in args: 
-                    customer_full_name = args.pop("name")
-                    name_parts = customer_full_name.split(maxsplit=1)
-                    first_name = name_parts[0]
-                    last_name = name_parts[1] if len(name_parts) > 1 else ""
-
-                    read_args = {"first_name": first_name, "last_name": last_name}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result and read_result["result"]:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("FirstName", "").lower() == first_name.lower() and
-                                   r.get("LastName", "").lower() == last_name.lower()]
-                        if matches:
-                            args["customer_id"] = matches[0]["Id"]
-                            p["args"] = args
-                
-                if "customer_id" not in args and "name" in args: 
-                    read_args = {"name": args["name"]} 
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   (r.get("FirstName", "") + " " + r.get("LastName", "")).lower() == args["name"].lower()]
-                        if matches:
-                            args["customer_id"] = matches[0]["Id"]
-                            p["args"] = args
-
-                if "new_email" not in args:
-                    possible_email = re.search(r'to\s+([\w\.-]+@[\w\.-]+)', user_query, re.IGNORECASE)
-                    if possible_email:
-                        args["new_email"] = possible_email.group(1)
-                        p["args"] = args
-
-            # PostgreSQL: update by name
-            if tool == "postgresql_crud" and action == "update":
-                if "product_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("name", "").lower() == args["name"].lower()]
-                        if matches:
-                            args["product_id"] = matches[0]["id"]
-                            p["args"] = args
-                if "name" not in args:
-                    m = re.search(r'price of ([a-zA-Z0-9_ ]+?) (?:to|=)', user_query, re.I)
-                    if m:
-                        args["name"] = m.group(1).strip()
-                        p["args"] = args
-                if "new_price" not in args:
-                    possible_price = re.search(r'(?:to|=)\s*\$?(\d+(?:\.\d+)?)', user_query)
-                    if possible_price:
-                        args['new_price'] = float(possible_price.group(1))
-                        p["args"] = args
-                if "new_launch_date" not in args:
-                    possible_date = re.search(r'(?:date to|on)\s+(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})', user_query, re.IGNORECASE)
-                    if possible_date:
-                        date_str = possible_date.group(1)
-                        # Convert DD-MM-YYYY to YYYY-MM-DD for server
-                        if re.match(r'\d{2}-\d{2}-\d{4}', date_str):
-                            day, month, year = date_str.split('-')
-                            date_str = f"{year}-{month}-{day}"
-                        args['new_launch_date'] = date_str
-                        p["args"] = args
-
-            if tool == "postgresql_crud" and action == "delete":
-                if "product_id" not in args and "name" in args:
-                    read_args = {"name": args["name"]}
-                    read_result = call_mcp_tool(tool, "read", read_args)
-                    if isinstance(read_result, dict) and "result" in read_result:
-                        matches = [r for r in read_result["result"] if
-                                   r.get("name", "").lower() == args["name"].lower()]
-                        if matches:
-                            args["product_id"] = matches[0]["id"]
-                            p["args"] = args
-                if "product_id" not in args:
-                    match = re.search(r'product\s+(\w+)', user_query, re.IGNORECASE)
-                    if match:
-                        product_name = match.group(1)
-                        read_args = {"name": product_name}
-                        read_result = call_mcp_tool(tool, "read", read_args)
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            matches = [r for r in read_result["result"] if
-                                       r.get("name", "").lower() == product_name.lower()]
-                            if matches:
-                                args["product_id"] = matches[0]["id"]
-                                p["args"] = args
+            if is_visualization and action == "visualize":
+                # Handle visualization request
+                with st.spinner("🎨 Creating your visualization..."):
+                    try:
+                        # Call the visualization handler
+                        viz_result = asyncio.run(handle_visualization_request(p, user_query))
+                        
+                        # Add visualization response to chat
+                        assistant_message = {
+                            "role": "assistant",
+                            "content": viz_result,
+                            "format": "visualization",
+                            "chart_type": chart_type,
+                            "user_query": user_query,
+                            "tool": tool
+                        }
+                        st.session_state.messages.append(assistant_message)
+                        
+                    except Exception as viz_error:
+                        error_msg = f"❌ Visualization Error: {str(viz_error)}"
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": error_msg,
+                            "format": "text"
+                        })
             
-            # If all checks pass, execute the tool call
-            try_execute_tool_call(p, user_query, current_llm_model, selected_display_option)
+            else:
+                # Handle regular CRUD operations (existing logic)
+                # VALIDATE AND CLEAN PARAMETERS
+                args = validate_and_clean_parameters(tool, args)
+                args = normalize_args(args)
+                p["args"] = args
+
+                # ========== ENHANCED NAME-BASED RESOLUTION ==========
+                
+                # For SQL Server (customers) operations
+                if tool == "sqlserver_crud":
+                    if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
+                        # First, try to find the customer by name
+                        name_to_find = args["name"]
+                        try:
+                            # Search for customer by name
+                            read_result = call_mcp_tool(tool, "read", {})
+                            if isinstance(read_result, dict) and "result" in read_result:
+                                customers = read_result["result"]
+                                # Try exact match first
+                                exact_matches = [c for c in customers if c.get("Name", "").lower() == name_to_find.lower()]
+                                if exact_matches:
+                                    args["customer_id"] = exact_matches[0]["Id"]
+                                else:
+                                    # Try partial matches (first name or last name)
+                                    partial_matches = [c for c in customers if 
+                                        name_to_find.lower() in c.get("Name", "").lower() or
+                                        name_to_find.lower() in c.get("FirstName", "").lower() or 
+                                        name_to_find.lower() in c.get("LastName", "").lower()]
+                                    if partial_matches:
+                                        args["customer_id"] = partial_matches[0]["Id"]
+                                    else:
+                                        raise Exception(f"❌ Customer '{name_to_find}' not found")
+                        except Exception as e:
+                            if "not found" in str(e):
+                                raise e
+                            else:
+                                raise Exception(f"❌ Error finding customer '{name_to_find}': {str(e)}")
+
+                    # Extract new email for updates
+                    if action == "update" and "new_email" not in args:
+                        possible_email = extract_email(user_query)
+                        if possible_email:
+                            args["new_email"] = possible_email
+
+                # For PostgreSQL (products) operations  
+                elif tool == "postgresql_crud":
+                    if action in ["update", "delete"] and "name" in args and "product_id" not in args:
+                        # First, try to find the product by name
+                        name_to_find = args["name"]
+                        try:
+                            # Search for product by name
+                            read_result = call_mcp_tool(tool, "read", {})
+                            if isinstance(read_result, dict) and "result" in read_result:
+                                products = read_result["result"]
+                                # Try exact match first
+                                exact_matches = [p for p in products if p.get("name", "").lower() == name_to_find.lower()]
+                                if exact_matches:
+                                    args["product_id"] = exact_matches[0]["id"]
+                                else:
+                                    # Try partial matches
+                                    partial_matches = [p for p in products if name_to_find.lower() in p.get("name", "").lower()]
+                                    if partial_matches:
+                                        args["product_id"] = partial_matches[0]["id"]
+                                    else:
+                                        raise Exception(f"❌ Product '{name_to_find}' not found")
+                        except Exception as e:
+                            if "not found" in str(e):
+                                raise e
+                            else:
+                                raise Exception(f"❌ Error finding product '{name_to_find}': {str(e)}")
+
+                    # Extract new price for updates
+                    if action == "update" and "new_price" not in args:
+                        possible_price = extract_price(user_query)
+                        if possible_price is not None:
+                            args['new_price'] = possible_price
+
+                # Update the parsed args
+                p["args"] = args
+
+                # Handle describe operations
+                if action == "describe" and "table_name" in args:
+                    if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
+                        args["table_name"] = "Customers"
+                    if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
+                        args["table_name"] = "products"
+
+                # Execute the regular CRUD operation
+                raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
+                
+                # Process the result
+                for step in user_steps:
+                    st.session_state.messages.append(step)
+                if isinstance(raw, dict) and "sql" in raw and "result" in raw:
+                    reply, fmt = raw, "sql_crud"
+                else:
+                    reply, fmt = format_natural(raw), "text"
+                
+                assistant_message = {
+                    "role": "assistant",
+                    "content": reply,
+                    "format": fmt,
+                    "request": p,
+                    "tool": p.get("tool"),
+                    "action": p.get("action"),
+                    "args": p.get("args"),
+                    "user_query": user_query,
+                }
+                st.session_state.messages.append(assistant_message)
 
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
@@ -1551,126 +2161,9 @@ if application == "MCP Application":
                 "content": reply,
                 "format": fmt,
             }
-            st.session_state.messages.append({
-                "role": "user",
-                "content": user_query,
-                "format": "text",
-            })
             st.session_state.messages.append(assistant_message)
+        
         st.rerun()  # Rerun so chat output appears
-
-    # ========== Function to execute tool call and update messages ==========
-    def try_execute_tool_call(p: dict, user_query: str, current_llm_model: str, selected_display_option: str):
-        try:
-            # Do NOT pass display_format to the server
-            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
-        except Exception as e:
-            reply, fmt = f"⚠️ Error calling tool '{p.get('tool')}': {e}", "text"
-            assistant_message = {
-                "role": "assistant",
-                "content": reply,
-                "format": fmt,
-            }
-            st.session_state.messages.append(assistant_message)
-            return
-
-        if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-            # For SQL CRUD results, apply formatting to the 'result' part
-            if isinstance(raw["result"], list):
-                # Filter out records with null email if Null Value Removal/Handling is selected
-                filtered_data = []
-                for row in raw["result"]:
-                    if selected_display_option == "Null Value Removal/Handling" and "customer_email" in row and (row["customer_email"] is None or row["customer_email"] == "N/A"):
-                        continue
-                    if selected_display_option == "Null Value Removal/Handling" and "Email" in row and (row["Email"] is None or row["Email"] == "N/A"):
-                        continue
-                    filtered_data.append(row)
-
-                reply_content = {
-                    "sql": raw["sql"],
-                    "result": [] # Initialize as empty list
-                }
-                for item in filtered_data:
-                    try:
-                        # format_natural returns a string like "Key: Value, Key2: Value2."
-                        # We need to convert this back to a dictionary for display in st.table.
-                        formatted_str = format_natural(item, selected_display_option)
-                        
-                        # This regex attempts to parse "Key: Value" pairs from the string.
-                        # It's robust to spaces and handles the trailing period.
-                        parsed_dict = {}
-                        # Remove trailing period if present
-                        clean_str = formatted_str.strip()
-                        if clean_str.endswith('.'):
-                            clean_str = clean_str[:-1]
-
-                        pairs = re.findall(r"([^:]+):\s*([^,]+)(?:,\s*|$)", clean_str)
-                        for key_raw, value_raw in pairs:
-                            key = key_raw.strip().replace(" ", "_").lower() # Normalize key names
-                            value = value_raw.strip()
-                            # Attempt to convert to appropriate types if possible
-                            if value.replace('.', '', 1).isdigit(): # Check if it's a number (int or float)
-                                if '.' in value:
-                                    parsed_dict[key] = float(value)
-                                else:
-                                    parsed_dict[key] = int(value)
-                            elif value.lower() in ['true', 'false']:
-                                parsed_dict[key] = value.lower() == 'true'
-                            else:
-                                parsed_dict[key] = value
-                        
-                        reply_content["result"].append(parsed_dict)
-                    except Exception as e:
-                        st.warning(f"Failed to parse formatted row for table display: {e}. Original formatted string: {formatted_str}")
-                        reply_content["result"].append(item) # Fallback to raw item if parsing fails
-
-            elif isinstance(raw["result"], dict):
-                # Apply formatting for single dictionary results (e.g., describe)
-                reply_content = {
-                    "sql": raw["sql"],
-                    "result": {} # Initialize as empty dict
-                }
-                try:
-                    formatted_str = format_natural(raw["result"], selected_display_option)
-                    clean_str = formatted_str.strip()
-                    if clean_str.endswith('.'):
-                        clean_str = clean_str[:-1]
-                    
-                    parsed_dict = {}
-                    pairs = re.findall(r"([^:]+):\s*([^,]+)(?:,\s*|$)", clean_str)
-                    for key_raw, value_raw in pairs:
-                        key = key_raw.strip().replace(" ", "_").lower()
-                        value = value_raw.strip()
-                        if value.replace('.', '', 1).isdigit():
-                            if '.' in value:
-                                parsed_dict[key] = float(value)
-                            else:
-                                parsed_dict[key] = int(value)
-                        elif value.lower() in ['true', 'false']:
-                            parsed_dict[key] = value.lower() == 'true'
-                        else:
-                            parsed_dict[key] = value
-                    reply_content["result"] = parsed_dict
-                except Exception as e:
-                    st.warning(f"Failed to parse formatted dict for table display: {e}. Original formatted string: {formatted_str}")
-                    reply_content["result"] = raw["result"] # Fallback to raw dict
-            else:
-                reply_content = raw # Fallback for non-list/dict results
-            fmt = "sql_crud"
-        else:
-            reply_content, fmt = format_natural(raw, selected_display_option), "text" # Apply formatting here
-
-        assistant_message = {
-            "role": "assistant",
-            "content": reply_content,
-            "format": fmt,
-            "request": p,
-            "tool": p.get("tool"),
-            "action": p.get("action"),
-            "args": p.get("args"),
-            "user_query": user_query,
-        }
-        st.session_state.messages.append(assistant_message)
 
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
     components.html("""
@@ -1679,7 +2172,115 @@ if application == "MCP Application":
         </script>
     """)
 
+# ========== ETL FUNCTIONS & VISUALIZATION EXAMPLES ==========
+with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
+    st.markdown("""
+    ### ETL Display Formatting Functions
 
+    Your MCP server supports 4 ETL (Extract, Transform, Load) functions for data formatting:
 
+    #### 1. Data Format Conversion
+    - **Query Examples:** 
+      - "show sales with data format conversion"
+      - "convert sales data format"
+      - "format sales data for export"
+    - **What it does:** Converts dates to string format, removes unnecessary fields
 
+    #### 2. Decimal Value Formatting  
+    - **Query Examples:**
+      - "format sales prices with decimal formatting" 
+      - "show sales with 2 decimal places"
+      - "decimal value formatting for sales"
+    - **What it does:** Formats all prices to exactly 2 decimal places as strings
 
+    #### 3. String Concatenation
+    - **Query Examples:**
+      - "combine sales fields for readability"
+      - "show sales with concatenated fields"
+    - **What it does:** Creates readable summary fields by combining related data
+
+    #### 4. Null Value Removal/Handling
+    - **Query Examples:**
+      - "clean sales data with null handling"
+      - "remove nulls from sales data"
+      - "handle null values in sales"
+    - **What it does:** Filters out incomplete records and handles null values
+
+    ---
+
+    ### 📊 NEW: Data Visualization Features
+
+    Create interactive charts and dashboards with natural language:
+
+    #### Bar Charts
+    - **"create a bar chart of sales by customer"**
+    - **"show me a bar chart of product prices"**
+    - **"visualize customer distribution as a bar graph"**
+    - **"bar chart of total sales by product"**
+
+    #### Line Charts  
+    - **"create a line chart of sales trends over time"**
+    - **"show sales trend as a line graph"**
+    - **"visualize revenue over time"**
+    - **"plot sales timeline"**
+
+    #### Pie Charts
+    - **"create a pie chart of customer distribution"**
+    - **"show product sales as a pie chart"**
+    - **"visualize sales percentage by customer"**
+    - **"pie chart of revenue breakdown"**
+
+    #### Scatter Plots
+    - **"create a scatter plot of price vs quantity"**
+    - **"plot relationship between unit price and total sales"**
+    - **"scatter chart of customer spending patterns"**
+
+    #### Multi-Chart Dashboards
+    - **"create a sales dashboard"**
+    - **"show me a comprehensive analytics dashboard"**
+    - **"create multiple charts for sales analysis"**
+    - **"build a data visualization dashboard"**
+
+    #### Quick Visualization
+    - After viewing any data table, use the **📊 Quick Visualization Options** buttons
+    - Instantly convert table data into charts without typing new queries
+    - Available for all CRUD query results
+
+    ---
+
+    ### Regular Operations
+    - **"list all sales"** - Shows regular unformatted sales data
+    - **"show customers"** - Shows customer data
+    - **"list products"** - Shows product inventory
+    
+    ### Smart Name-Based Operations
+    - **"delete customer Alice"** - Finds and deletes Alice by name
+    - **"delete Alice Johnson"** - Finds customer by full name
+    - **"remove Johnson"** - Finds customer by last name
+    - **"delete product Widget"** - Finds and deletes Widget by name
+    - **"update price of Gadget to 25"** - Updates Gadget price to $25
+    - **"change email of Bob to bob@new.com"** - Updates Bob's email
+
+    ---
+
+    ### 🎯 Pro Tips for Visualizations
+    
+    1. **Be Specific**: "bar chart of sales by customer" works better than "chart sales"
+    2. **Use Data Context**: The system auto-detects the best data source based on your query
+    3. **Combine with Filters**: "bar chart of sales above $50"
+    4. **Multiple Views**: Use "dashboard" for comprehensive multi-chart analysis
+    5. **Quick Access**: Use the visualization buttons that appear after any data query
+    
+    ### 🔍 AI-Powered Insights
+    
+    Every visualization includes:
+    - **Automatic trend analysis**
+    - **Key pattern detection**
+    - **Business insights and recommendations**
+    - **Export options for charts**
+    - **Interactive drill-down capabilities**
+    """)
+
+# Add this section at the very end to prevent any import/layout issues
+if __name__ == "__main__":
+    pass
