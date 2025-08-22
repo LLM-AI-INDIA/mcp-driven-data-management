@@ -637,7 +637,7 @@ def create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_fun
     chart_data = [{"x": k, "y": v} for k, v in aggregated.items()]
     
     return {
-        "type": "bar",
+        "chart_type": "bar",
         "data": chart_data,
         "layout": {
             "title": title or f"{aggregate_function.title()} of {y_axis} by {x_axis}",
@@ -676,7 +676,7 @@ def create_line_chart_config_server(data, x_axis, y_axis, group_by, title):
     chart_data = [{"x": row.get(x_axis), "y": float(row.get(y_axis, 0))} for row in sorted_data]
     
     return {
-        "type": "line",
+        "chart_type": "line",
         "data": chart_data,
         "layout": {
             "title": title or f"{y_axis.replace('_', ' ').title()} Over {x_axis.replace('_', ' ').title()}",
@@ -727,7 +727,7 @@ def create_pie_chart_config_server(data, group_by, value_field, aggregate_functi
     values = list(aggregated.values())
     
     return {
-        "type": "pie",
+        "chart_type": "pie",
         "data": {
             "labels": labels,
             "values": values
@@ -766,7 +766,7 @@ def create_scatter_chart_config_server(data, x_axis, y_axis, title):
                 continue
     
     return {
-        "type": "scatter",
+        "chart_type": "scatter",
         "data": chart_data,
         "layout": {
             "title": title or f"{y_axis.replace('_', ' ').title()} vs {x_axis.replace('_', ' ').title()}",
@@ -801,7 +801,7 @@ def create_multi_dashboard_config_server(data, title):
         charts.append(create_pie_chart_config_server(data, "product_name", "quantity", "sum", "Product Sales Distribution"))
     
     return {
-        "type": "multi",
+        "chart_type": "multi",
         "charts": charts,
         "layout": {
             "title": title or "Sales Analytics Dashboard",
