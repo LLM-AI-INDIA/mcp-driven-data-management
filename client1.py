@@ -370,7 +370,7 @@ def _clean_json(raw: str) -> str:
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('https://mcp-znag.onrender.com/', 'http://localhost:8000')}/mcp")
+        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000')}/mcp")
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
@@ -404,90 +404,158 @@ def get_image_base64(img_path):
 # ========== VISUALIZATION FUNCTIONS ==========
 def create_plotly_chart(chart_config):
     """Create Plotly chart from configuration"""
-    
-    if not chart_config or chart_config.get("type") == "error":
+    if not chart_config or chart_config.get("chart_type") == "error":  
         return None
     
-    chart_type = chart_config.get("type")
+    chart_type = chart_config.get("chart_type")  
+    if not chart_type:  
+        return None
     layout = chart_config.get("layout", {})
-    
     fig = None
     
     if chart_type == "bar":
         data = chart_config.get("data", [])
-        x_values = [item["x"] for item in data]
-        y_values = [item["y"] for item in data]
-        
-        fig = go.Figure(data=[
-            go.Bar(x=x_values, y=y_values, name="", marker_color='#4286f4')
-        ])
-        
+        if data:  # Add safety check
+            x_values = [item.get("x", "") for item in data]
+            y_values = [item.get("y", 0) for item in data]
+            fig = go.Figure(data=[
+                go.Bar(x=x_values, y=y_values, name="", marker_color='#4286f4')
+            ])
+    
     elif chart_type == "line":
         data = chart_config.get("data", [])
-        x_values = [item["x"] for item in data]
-        y_values = [item["y"] for item in data]
-        
-        fig = go.Figure(data=[
-            go.Scatter(x=x_values, y=y_values, mode='lines+markers', 
-                      name="", line=dict(color='#4286f4', width=3),
-                      marker=dict(size=8))
-        ])
-        
+        if data:  # Add safety check
+            x_values = [item.get("x", "") for item in data]
+            y_values = [item.get("y", 0) for item in data]
+            fig = go.Figure(data=[
+                go.Scatter(x=x_values, y=y_values, mode='lines+markers', name="", 
+                          line=dict(color='#4286f4', width=3), marker=dict(size=8))
+            ])
+    
     elif chart_type == "pie":
         pie_data = chart_config.get("data", {})
         labels = pie_data.get("labels", [])
         values = pie_data.get("values", [])
-        
-        fig = go.Figure(data=[
-            go.Pie(labels=labels, values=values, hole=0.3,
-                  marker=dict(colors=px.colors.qualitative.Set3))
-        ])
-        
+        if labels and values:  # Add safety check
+            fig = go.Figure(data=[
+                go.Pie(labels=labels, values=values, hole=0.3, 
+                       marker=dict(colors=px.colors.qualitative.Set3))
+            ])
+    
     elif chart_type == "scatter":
         data = chart_config.get("data", [])
-        x_values = [item["x"] for item in data]
-        y_values = [item["y"] for item in data]
-        
-        fig = go.Figure(data=[
-            go.Scatter(x=x_values, y=y_values, mode='markers',
-                      name="", marker=dict(size=10, color='#4286f4'))
-        ])
-        
+        if data:  # Add safety check
+            x_values = [item.get("x", 0) for item in data]
+            y_values = [item.get("y", 0) for item in data]
+            fig = go.Figure(data=[
+                go.Scatter(x=x_values, y=y_values, mode='markers', name="", 
+                          marker=dict(size=10, color='#4286f4'))
+            ])
+    
     elif chart_type == "multi":
         # Handle multiple charts in subplots
         charts = chart_config.get("charts", [])
-        if len(charts) >= 2:
+        if len(charts) >= 1:  # At least one chart needed
+            
+            # Dynamically determine subplot specs based on chart types
+            specs = []
+            chart_titles = []
+            valid_charts = [chart for chart in charts[:4] if isinstance(chart, dict)]
+            
+            # Create 2x2 grid specs
+            for i in range(4):
+                if i < len(valid_charts):
+                    chart = valid_charts[i]
+                    chart_type_inner = chart.get("chart_type", "bar")
+                    chart_titles.append(chart.get("layout", {}).get("title", f"Chart {i+1}"))
+                    
+                    # Use "domain" type for pie charts, "xy" for others
+                    if chart_type_inner == "pie":
+                        spec = {"type": "domain"}
+                    else:
+                        spec = {"type": "xy"}
+                else:
+                    # Empty subplot
+                    spec = {"type": "xy"}
+                    chart_titles.append("")
+                
+                # Add to specs in 2x2 arrangement
+                if i == 0:
+                    specs.append([spec])
+                elif i == 1:
+                    specs[0].append(spec)
+                elif i == 2:
+                    specs.append([spec])
+                elif i == 3:
+                    specs[1].append(spec)
+            
+            # Ensure we have a complete 2x2 grid
+            while len(specs) < 2:
+                specs.append([{"type": "xy"}, {"type": "xy"}])
+            while len(specs[0]) < 2:
+                specs[0].append({"type": "xy"})
+            while len(specs[1]) < 2:
+                specs[1].append({"type": "xy"})
+            
             fig = make_subplots(
                 rows=2, cols=2,
-                subplot_titles=[chart.get("layout", {}).get("title", f"Chart {i+1}") 
-                               for i, chart in enumerate(charts[:4])],
-                specs=[[{"type": "xy"}, {"type": "xy"}],
-                       [{"type": "domain"}, {"type": "xy"}]]
+                subplot_titles=chart_titles[:4],
+                specs=specs
             )
             
-            # Add first chart (bar)
-            if len(charts) > 0 and charts[0].get("type") == "bar":
-                data = charts[0].get("data", [])
-                x_vals = [item["x"] for item in data]
-                y_vals = [item["y"] for item in data]
-                fig.add_trace(go.Bar(x=x_vals, y=y_vals, name="Sales by Customer", 
-                                   marker_color='#4286f4'), row=1, col=1)
-            
-            # Add second chart (line)
-            if len(charts) > 1 and charts[1].get("type") == "line":
-                data = charts[1].get("data", [])
-                x_vals = [item["x"] for item in data]
-                y_vals = [item["y"] for item in data]
-                fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers',
-                                       name="Trend", line=dict(color='#39e639')), row=1, col=2)
-            
-            # Add third chart (pie)
-            if len(charts) > 2 and charts[2].get("type") == "pie":
-                pie_data = charts[2].get("data", {})
-                labels = pie_data.get("labels", [])
-                values = pie_data.get("values", [])
-                fig.add_trace(go.Pie(labels=labels, values=values, name="Distribution",
-                                   marker=dict(colors=px.colors.qualitative.Pastel)), row=2, col=1)
+            # Process each chart in the list
+            for i, chart in enumerate(valid_charts[:4]):  # Limit to 4 charts max
+                chart_type_inner = chart.get("chart_type")
+                chart_data = chart.get("data", [])
+                
+                # Determine subplot position
+                row = 1 if i < 2 else 2
+                col = (i % 2) + 1
+                
+                if chart_type_inner == "bar" and chart_data:
+                    x_vals = [item.get("x", "") for item in chart_data]
+                    y_vals = [item.get("y", 0) for item in chart_data]
+                    
+                    fig.add_trace(
+                        go.Bar(x=x_vals, y=y_vals, 
+                               name=f"Bar Chart {i+1}", 
+                               marker_color='#4286f4'), 
+                        row=row, col=col
+                    )
+                
+                elif chart_type_inner == "line" and chart_data:
+                    x_vals = [item.get("x", "") for item in chart_data]
+                    y_vals = [item.get("y", 0) for item in chart_data]
+                    
+                    fig.add_trace(
+                        go.Scatter(x=x_vals, y=y_vals, mode='lines+markers', 
+                                 name=f"Line Chart {i+1}", 
+                                 line=dict(color='#39e639')), 
+                        row=row, col=col
+                    )
+                
+                elif chart_type_inner == "pie":
+                    # Handle both dict and list data formats for pie charts
+                    if isinstance(chart_data, dict):
+                        labels = chart_data.get("labels", [])
+                        values = chart_data.get("values", [])
+                    else:
+                        # If chart_data is a list, try to extract pie data from the chart
+                        pie_data = chart.get("data", {})
+                        if isinstance(pie_data, dict):
+                            labels = pie_data.get("labels", [])
+                            values = pie_data.get("values", [])
+                        else:
+                            labels = []
+                            values = []
+                    
+                    if labels and values:
+                        fig.add_trace(
+                            go.Pie(labels=labels, values=values, 
+                                   name=f"Pie Chart {i+1}",
+                                   marker=dict(colors=px.colors.qualitative.Pastel)), 
+                            row=row, col=col
+                        )
     
     if fig:
         # Apply layout
@@ -659,117 +727,268 @@ async def handle_visualization_request(parsed_query, user_query):
     except Exception as e:
         return {"error": f"Visualization processing error: {str(e)}", "chart_config": None}
 
-def create_chart_config_from_data(data, chart_type, data_source):
-    """Create chart configuration from actual data"""
-    
-    if not data or not isinstance(data, list) or len(data) == 0:
-        return {"error": "No data available for visualization"}
-    
-    # Auto-detect fields based on data source
-    if data_source == "sales":
-        x_field = "customer_name" if "customer_name" in data[0] else "Name"
-        y_field = "total_price" if "total_price" in data[0] else "unit_price"
-    elif data_source == "customers":
-        x_field = "Name" if "Name" in data[0] else "name"
-        y_field = "Id" if "Id" in data[0] else "id"
-    elif data_source == "products":
-        x_field = "name"
-        y_field = "price"
-    else:
-        # Default to first text field and first numeric field
-        x_field = None
-        y_field = None
-        for key, value in data[0].items():
-            if x_field is None and isinstance(value, str):
-                x_field = key
-            if y_field is None and isinstance(value, (int, float)):
-                y_field = key
-    
-    if chart_type == "bar":
-        return create_bar_chart_config(data, x_field, y_field)
-    elif chart_type == "line":
-        return create_line_chart_config(data, x_field, y_field)
-    elif chart_type == "pie":
-        return create_pie_chart_config(data, x_field, y_field)
-    elif chart_type == "scatter":
-        return create_scatter_chart_config(data, x_field, y_field)
-    elif chart_type == "multi":
-        return create_multi_chart_config(data, data_source)
-    else:
-        return create_bar_chart_config(data, x_field, y_field)
 
-def create_bar_chart_config(data, x_field, y_field):
-    """Create bar chart configuration from data"""
+async def handle_visualization_request(parsed_query, user_query):
+    """Handle visualization requests with proper field mapping"""
+    
+    try:
+        # Extract parameters from parsed query
+        tool = parsed_query.get("tool", "sales_crud")
+        chart_type = parsed_query.get("chart_type", "bar")
+        args = parsed_query.get("args", {})
+        
+        # NEW: Extract field mapping from parsed query
+        x_field = parsed_query.get("x_field")
+        y_field = parsed_query.get("y_field")
+        aggregate = parsed_query.get("aggregate", "sum")
+        
+        print(f"DEBUG: Visualization request - tool: {tool}, chart_type: {chart_type}")
+        print(f"DEBUG: Field mapping - x_field: {x_field}, y_field: {y_field}, aggregate: {aggregate}")
+        
+        # Map tool to data source
+        data_source_map = {
+            "sales_crud": "sales",
+            "sqlserver_crud": "customers", 
+            "postgresql_crud": "products",
+            "careplan_crud": "careplan"
+        }
+        
+        data_source = data_source_map.get(tool, "sales")
+        
+        # Get actual data from the MCP tool
+        raw_data = await _invoke_tool(tool, "read", args)
+        
+        if not raw_data or not isinstance(raw_data, dict) or not raw_data.get("result"):
+            return {"error": "No data found for visualization", "chart_config": None}
+        
+        data = raw_data["result"]
+        data_count = len(data) if isinstance(data, list) else 0
+        
+        # Create chart configuration with explicit field mapping
+        chart_config = create_chart_config_from_data(data, chart_type, data_source, x_field, y_field, aggregate)
+        
+        return {
+            "chart_type": chart_type,
+            "data_source": data_source,
+            "chart_config": chart_config,
+            "data_count": data_count,
+            "sql": raw_data.get("sql", ""),
+            "success": True
+        }
+        
+    except Exception as e:
+        return {"error": f"Visualization processing error: {str(e)}", "chart_config": None}
+
+
+def create_chart_config_from_data(data, chart_type, data_source, x_field=None, y_field=None, aggregate=None):
+    """Create chart configuration from actual data with explicit field mapping"""
+    if not data or not isinstance(data, list) or len(data) == 0:
+        return {"chart_type": "error", "error": "No data available for visualization"}
+    
+    try:
+        print(f"DEBUG: Creating chart config for {chart_type} with {len(data)} records")
+        print(f"DEBUG: Sample data: {data[0]}")
+        print(f"DEBUG: Available fields: {list(data[0].keys())}")
+        print(f"DEBUG: Requested fields - x: {x_field}, y: {y_field}, agg: {aggregate}")
+        
+        # Use provided field mapping if available, otherwise auto-detect
+        if not x_field or not y_field:
+            # Auto-detect fields based on data source
+            if data_source == "sales":
+                x_field = x_field or "customer_name"  # Default to customer_name if not specified
+                y_field = y_field or "total_price" 
+                aggregate = aggregate or "sum"
+            elif data_source == "customers":
+                x_field = x_field or "Name"
+                y_field = y_field or "Id"
+                aggregate = aggregate or "count"
+            elif data_source == "products":
+                x_field = x_field or "name"
+                y_field = y_field or "price"
+                aggregate = aggregate or "avg"
+            else:
+                # Fallback logic
+                x_field = x_field or list(data[0].keys())[0]
+                y_field = y_field or list(data[0].keys())[1] if len(data[0]) > 1 else x_field
+                aggregate = aggregate or "sum"
+        
+        print(f"DEBUG: Final fields - x: {x_field}, y: {y_field}, agg: {aggregate}")
+        
+        if chart_type == "bar":
+            return create_bar_chart_config(data, x_field, y_field, aggregate)
+        elif chart_type == "line":
+            return create_line_chart_config(data, x_field, y_field)
+        elif chart_type == "pie":
+            return create_pie_chart_config(data, x_field, y_field, aggregate)
+        elif chart_type == "scatter":
+            return create_scatter_chart_config(data, x_field, y_field)
+        elif chart_type == "multi":
+            return create_multi_chart_config(data, data_source)
+        else:
+            return create_bar_chart_config(data, x_field, y_field, aggregate)
+    
+    except Exception as e:
+        return {"chart_type": "error", "error": f"Chart configuration error: {str(e)}"}
+
+
+
+
+def create_bar_chart_config(data, x_field, y_field, aggregate="sum"):
+    """Create bar chart configuration from data with explicit field mapping"""
     chart_data = []
+    
+    print(f"DEBUG: Bar chart - using x_field: {x_field}, y_field: {y_field}, aggregate: {aggregate}")
+    
+    # Check if the specified fields exist in the data
+    if x_field not in data[0]:
+        print(f"WARNING: x_field '{x_field}' not found in data. Available fields: {list(data[0].keys())}")
+        # Try to find a similar field
+        for field in data[0].keys():
+            if field.lower().replace('_', '').replace(' ', '') == x_field.lower().replace('_', '').replace(' ', ''):
+                x_field = field
+                print(f"DEBUG: Using similar field '{field}' instead")
+                break
+    
+    if y_field not in data[0]:
+        print(f"WARNING: y_field '{y_field}' not found in data. Available fields: {list(data[0].keys())}")
+        # Try to find a similar field
+        for field in data[0].keys():
+            if field.lower().replace('_', '').replace(' ', '') == y_field.lower().replace('_', '').replace(' ', ''):
+                y_field = field
+                print(f"DEBUG: Using similar field '{field}' instead")
+                break
     
     # Aggregate data by x_field
     aggregated = {}
     for row in data:
         key = str(row.get(x_field, "Unknown"))
-        value = float(row.get(y_field, 0)) if row.get(y_field) is not None else 0
         
-        if key in aggregated:
-            aggregated[key] += value
+        if aggregate == "count":
+            # Count occurrences
+            if key in aggregated:
+                aggregated[key] += 1
+            else:
+                aggregated[key] = 1
         else:
-            aggregated[key] = value
+            # Sum/average the y_field values
+            value = row.get(y_field, 0)
+            if value is None:
+                value = 0
+            try:
+                value = float(value)
+            except (ValueError, TypeError):
+                value = 0
+            
+            if key in aggregated:
+                if aggregate == "sum":
+                    aggregated[key] += value
+                elif aggregate == "avg":
+                    if isinstance(aggregated[key], dict):
+                        aggregated[key]["sum"] += value
+                        aggregated[key]["count"] += 1
+                    else:
+                        old_val = aggregated[key]
+                        aggregated[key] = {"sum": old_val + value, "count": 2}
+            else:
+                if aggregate == "avg":
+                    aggregated[key] = {"sum": value, "count": 1}
+                else:
+                    aggregated[key] = value
+    
+    # Process averages
+    if aggregate == "avg":
+        for key in aggregated:
+            if isinstance(aggregated[key], dict):
+                aggregated[key] = aggregated[key]["sum"] / aggregated[key]["count"]
     
     chart_data = [{"x": k, "y": v} for k, v in aggregated.items()]
     
-    return {
-        "type": "bar",
-        "data": chart_data,
-        "layout": {
-            "title": f"Bar Chart - {y_field} by {x_field}",
-            "xaxis": {"title": x_field.replace("_", " ").title()},
-            "yaxis": {"title": y_field.replace("_", " ").title()},
-            "showlegend": False
-        }
-    }
-
-def create_line_chart_config(data, x_field, y_field):
-    """Create line chart configuration from data"""
-    # Sort data and create line chart
-    sorted_data = sorted(data, key=lambda x: x.get(x_field, ""))
-    chart_data = [{"x": row.get(x_field), "y": float(row.get(y_field, 0))} for row in sorted_data]
+    print(f"DEBUG: Aggregated data: {aggregated}")
+    
+    # Create appropriate labels
+    if aggregate == "count":
+        y_label = f"Count"
+    else:
+        y_label = f"{aggregate.title()} of {y_field.replace('_', ' ').title()}"
     
     return {
-        "type": "line",
+        "chart_type": "bar",
         "data": chart_data,
         "layout": {
-            "title": f"Line Chart - {y_field} Over {x_field}",
+            "title": f"{y_label} by {x_field.replace('_', ' ').title()}",
+            "xaxis": {"title": x_field.replace("_", " ").title()},
+            "yaxis": {"title": y_label},
+            "showlegend": False
+        }
+    }
+
+
+def create_line_chart_config(data, x_field, y_field):
+    """Create line chart configuration"""
+    # Sort data and create line chart
+    sorted_data = sorted(data, key=lambda x: str(x.get(x_field, "")))
+    chart_data = []
+    
+    for row in sorted_data:
+        x_val = row.get(x_field)
+        y_val = row.get(y_field, 0)
+        
+        try:
+            y_val = float(y_val) if y_val is not None else 0
+        except (ValueError, TypeError):
+            y_val = 0
+        
+        chart_data.append({"x": x_val, "y": y_val})
+    
+    return {
+        "chart_type": "line",
+        "data": chart_data,
+        "layout": {
+            "title": f"{y_field.replace('_', ' ').title()} Over {x_field.replace('_', ' ').title()}",
             "xaxis": {"title": x_field.replace("_", " ").title()},
             "yaxis": {"title": y_field.replace("_", " ").title()},
             "showlegend": False
         }
     }
 
-def create_pie_chart_config(data, x_field, y_field):
-    """Create pie chart configuration from data"""
+def create_pie_chart_config(data, x_field, y_field, aggregate="count"):
+    """Create pie chart configuration"""
     # Aggregate data for pie chart
     aggregated = {}
     for row in data:
         key = str(row.get(x_field, "Unknown"))
-        value = float(row.get(y_field, 0)) if row.get(y_field) is not None else 1
         
-        if key in aggregated:
-            aggregated[key] += value
+        if aggregate == "count":
+            if key in aggregated:
+                aggregated[key] += 1
+            else:
+                aggregated[key] = 1
         else:
-            aggregated[key] = value
+            value = row.get(y_field, 0)
+            try:
+                value = float(value) if value is not None else 0
+            except (ValueError, TypeError):
+                value = 0
+            
+            if key in aggregated:
+                aggregated[key] += value
+            else:
+                aggregated[key] = value
     
     return {
-        "type": "pie",
+        "chart_type": "pie",
         "data": {
             "labels": list(aggregated.keys()),
             "values": list(aggregated.values())
         },
         "layout": {
-            "title": f"Pie Chart - Distribution of {y_field}",
+            "title": f"Distribution of {y_field.replace('_', ' ').title()}" if aggregate != "count" else f"Distribution by {x_field.replace('_', ' ').title()}",
             "showlegend": True
         }
     }
 
 def create_scatter_chart_config(data, x_field, y_field):
-    """Create scatter plot configuration from data"""
+    """Create scatter plot configuration"""
     chart_data = []
     for row in data:
         x_val = row.get(x_field)
@@ -781,15 +1000,16 @@ def create_scatter_chart_config(data, x_field, y_field):
                 continue
     
     return {
-        "type": "scatter",
+        "chart_type": "scatter",
         "data": chart_data,
         "layout": {
-            "title": f"Scatter Plot - {y_field} vs {x_field}",
+            "title": f"Scatter Plot - {y_field.replace('_', ' ').title()} vs {x_field.replace('_', ' ').title()}",
             "xaxis": {"title": x_field.replace("_", " ").title()},
             "yaxis": {"title": y_field.replace("_", " ").title()},
             "showlegend": False
         }
     }
+
 
 def create_multi_chart_config(data, data_source):
     """Create multiple charts for dashboard view"""
@@ -797,16 +1017,18 @@ def create_multi_chart_config(data, data_source):
     
     if data_source == "sales":
         # Bar chart of sales by customer
-        charts.append(create_bar_chart_config(data, "customer_name", "total_price"))
-        # Line chart over time
+        charts.append(create_bar_chart_config(data, "customer_name", "total_price", "sum"))
+        # Bar chart of sales by product
+        charts.append(create_bar_chart_config(data, "product_name", "total_price", "sum"))
+        # Line chart over time if date field exists
         if "sale_date" in data[0]:
             charts.append(create_line_chart_config(data, "sale_date", "total_price"))
         # Pie chart of product distribution
         if "product_name" in data[0]:
-            charts.append(create_pie_chart_config(data, "product_name", "quantity"))
+            charts.append(create_pie_chart_config(data, "product_name", "quantity", "sum"))
     
     return {
-        "type": "multi",
+        "chart_type": "multi",
         "charts": charts,
         "layout": {
             "title": f"{data_source.title()} Analytics Dashboard",
@@ -940,7 +1162,7 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
             return f"Operation completed successfully using {tool}."
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with visualization detection"""
+    """Enhanced parse user query with better visualization detection and field mapping"""
 
     if not available_tools:
         return {"error": "No tools available"}
@@ -963,154 +1185,145 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     is_visualization_request = any(keyword in query.lower() for keyword in visualization_keywords)
 
     system_prompt = (
-    "You are an intelligent database router for CRUD operations and data visualization. "
-    "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
+        "You are an intelligent database router for CRUD operations and data visualization. "
+        "Your job is to analyze the user's query and select the most appropriate tool and extract the correct grouping field.\n\n"
 
-    "RESPONSE FORMAT:\n"
-    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object, \"is_visualization\": boolean, \"chart_type\": string|null}\n\n"
+        "RESPONSE FORMAT:\n"
+        "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object, \"is_visualization\": boolean, \"chart_type\": string|null, \"x_field\": string|null, \"y_field\": string|null, \"aggregate\": string|null}\n\n"
 
-    "ACTION MAPPING:\n"
-    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-    "- 'create': for adding, inserting, or creating NEW records\n"
-    "- 'update': for modifying, changing, or updating existing records\n"
-    "- 'delete': for removing, deleting, or destroying records\n"
-    "- 'describe': for showing table structure, schema, or column information\n"
-    "- 'visualize': for creating charts, graphs, or dashboards\n\n"
+        "CRITICAL DATA SOURCE ANALYSIS:\n"
+        "When the query mentions 'sales by [SOMETHING]', analyze what [SOMETHING] is:\n"
+        "- 'sales by product' or 'total sales by product' → Use sales_crud tool, x_field='product_name', y_field='total_price', aggregate='sum'\n"
+        "- 'sales by customer' or 'total sales by customer' → Use sales_crud tool, x_field='customer_name', y_field='total_price', aggregate='sum'\n"
+        "- 'products by [anything]' → Use postgresql_crud tool\n"
+        "- 'customers by [anything]' → Use sqlserver_crud tool\n\n"
 
-    "VISUALIZATION DETECTION:\n"
-    "If the query contains visualization keywords like 'chart', 'graph', 'plot', 'visualize', 'dashboard', set:\n"
-    "- \"is_visualization\": true\n"
-    "- \"action\": \"visualize\"\n"
-    "- \"chart_type\": one of [\"bar\", \"line\", \"pie\", \"scatter\", \"multi\"]\n\n"
+        "ACTION MAPPING:\n"
+        "- 'read': for viewing, listing, showing, displaying, or getting records\n"
+        "- 'create': for adding, inserting, or creating NEW records\n"
+        "- 'update': for modifying, changing, or updating existing records\n"
+        "- 'delete': for removing, deleting, or destroying records\n"
+        "- 'describe': for showing table structure, schema, or column information\n"
+        "- 'visualize': for creating charts, graphs, or dashboards\n\n"
 
-    "CHART TYPE MAPPING:\n"
-    "- **Bar Chart**: 'bar chart', 'column chart', 'compare', 'breakdown by category'\n"
-    "- **Line Chart**: 'line chart', 'trend', 'over time', 'timeline', 'temporal analysis'\n"
-    "- **Pie Chart**: 'pie chart', 'distribution', 'percentage', 'proportion', 'share'\n"
-    "- **Scatter Plot**: 'scatter', 'correlation', 'relationship between', 'x vs y'\n"
-    "- **Multi**: 'dashboard', 'multiple charts', 'comprehensive view', 'analytics'\n\n"
+        "VISUALIZATION DETECTION:\n"
+        "If query contains visualization keywords, set:\n"
+        "- \"is_visualization\": true\n"
+        "- \"action\": \"visualize\"\n"
+        "- \"chart_type\": one of [\"bar\", \"line\", \"pie\", \"scatter\", \"multi\"]\n\n"
 
-    f"VISUALIZATION EXAMPLES:\n"
-    "- 'show me a bar chart of sales by customer' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"bar\"}}\n"
-    "- 'visualize sales trends over time' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"line\"}}\n"
-    "- 'create a pie chart of customer distribution' → {{\"tool\": \"sqlserver_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"pie\"}}\n"
-    "- 'plot product prices vs sales' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"scatter\"}}\n"
-    "- 'create a dashboard for sales analysis' → {{\"tool\": \"sales_crud\", \"action\": \"visualize\", \"is_visualization\": true, \"chart_type\": \"multi\"}}\n\n"
+        "CHART TYPE MAPPING:\n"
+        "- **Bar Chart**: 'bar chart', 'column chart', 'compare', 'breakdown by category'\n"
+        "- **Line Chart**: 'line chart', 'trend', 'over time', 'timeline', 'temporal analysis'\n"
+        "- **Pie Chart**: 'pie chart', 'distribution', 'percentage', 'proportion', 'share'\n"
+        "- **Scatter Plot**: 'scatter', 'correlation', 'relationship between', 'x vs y'\n"
+        "- **Multi**: 'dashboard', 'multiple charts', 'comprehensive view', 'analytics'\n\n"
 
-    "CRITICAL TOOL SELECTION RULES:\n"
-    "\n"
-    "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
-    "   - 'list products', 'show products', 'display products'\n"
-    "   - 'product inventory', 'product catalog', 'product information'\n"
-    "   - 'add product', 'create product', 'new product'\n"
-    "   - 'update product', 'change product price', 'modify product'\n"
-    "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
-    "   - Any query primarily about products, pricing, or inventory\n"
-    "   - 'visualize product prices', 'chart of product distribution'\n"
-    "\n"
-    "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
-    "   - 'list customers', 'show customers', 'display customers'\n"
-    "   - 'customer information', 'customer details'\n"
-    "   - 'add customer', 'create customer', 'new customer'\n"
-    "   - 'update customer', 'change customer email', 'modify customer'\n"
-    "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
-    "   - Any query primarily about customers, names, or emails\n"
-    "   - 'visualize customer data', 'chart of customer distribution'\n"
-    "\n"
-    "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
-    "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
-    "   - 'sales report', 'revenue data', 'purchase history'\n"
-    "   - 'who bought what', 'customer purchases'\n"
-    "   - Cross-database queries combining customer + product + sales info\n"
-    "   - 'create sale', 'add sale', 'new transaction'\n"
-    "   - Any query asking for combined data from multiple tables\n"
-    "   - 'visualize sales', 'sales dashboard', 'chart sales trends'\n"
-    "\n"
-    "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
-    "   - 'show care plans', 'list case notes', 'display care plans', 'care plan records'\n"
-    "   - 'list care plans with name John', 'care plans mentioning cancer'\n"
-    "   - 'show care plan without address', 'display only name and notes'\n"
-    "   - Any query related to healthcare records with Name, Address, Phone Number, Case Notes\n"
-    "   - 'visualize care plan data', 'chart of case types'\n\n"
+        "FIELD EXTRACTION RULES:\n"
+        "1. For 'sales by product' queries:\n"
+        "   - x_field: 'product_name' (what we're grouping by)\n"
+        "   - y_field: 'total_price' (what we're measuring)\n"
+        "   - aggregate: 'sum' (how to combine values)\n"
+        "   - tool: 'sales_crud' (source of data)\n\n"
 
-    "**ETL & DISPLAY FORMATTING RULES:**\n"
-    "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
-    "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
+        "2. For 'sales by customer' queries:\n"
+        "   - x_field: 'customer_name'\n"
+        "   - y_field: 'total_price'\n"
+        "   - aggregate: 'sum'\n"
+        "   - tool: 'sales_crud'\n\n"
 
-    "1. **DECIMAL FORMATTING:**\n"
-    "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
-    "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
-    "   - **Example Query:** 'show sales with 2 decimal places'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
+        "3. For 'customer distribution' queries:\n"
+        "   - x_field: 'Name'\n"
+        "   - y_field: 'Id'\n"
+        "   - aggregate: 'count'\n"
+        "   - tool: 'sqlserver_crud'\n\n"
 
-    "2. **DATE FORMATTING:**\n"
-    "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
-    "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
-    "   - **Example Query:** 'show sales with formatted dates'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
+        "4. For 'product' related queries:\n"
+        "   - x_field: 'name'\n"
+        "   - y_field: 'price'\n"
+        "   - aggregate: 'avg' or 'sum'\n"
+        "   - tool: 'postgresql_crud'\n\n"
 
-    "3. **NULL VALUE HANDLING:**\n"
-    "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
-    "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
-    "   - **Example Query:** 'show sales but remove records with missing info'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
+        "VISUALIZATION EXAMPLES:\n"
+        "- 'bar chart of total sales by product' → {\"tool\": \"sales_crud\", \"action\": \"visualize\", \"x_field\": \"product_name\", \"y_field\": \"total_price\", \"aggregate\": \"sum\", \"chart_type\": \"bar\"}\n"
+        "- 'sales by customer' → {\"tool\": \"sales_crud\", \"action\": \"visualize\", \"x_field\": \"customer_name\", \"y_field\": \"total_price\", \"aggregate\": \"sum\", \"chart_type\": \"bar\"}\n"
+        "- 'customer distribution' → {\"tool\": \"sqlserver_crud\", \"action\": \"visualize\", \"x_field\": \"Name\", \"y_field\": \"Id\", \"aggregate\": \"count\", \"chart_type\": \"bar\"}\n"
+        "- 'product prices' → {\"tool\": \"postgresql_crud\", \"action\": \"visualize\", \"x_field\": \"name\", \"y_field\": \"price\", \"aggregate\": \"avg\", \"chart_type\": \"bar\"}\n\n"
 
-    "4. **STRING CONCATENATION:**\n"
-    "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
-    "   - Use: {\"display_format\": \"String Concatenation\"}\n"
-    "   - **Example Query:** 'show sales with customer full names'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
+        "CRITICAL TOOL SELECTION RULES:\n"
+        "\n"
+        "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
+        "   - 'list products', 'show products', 'display products'\n"
+        "   - 'product inventory', 'product catalog', 'product information'\n"
+        "   - 'add product', 'create product', 'new product'\n"
+        "   - 'update product', 'change product price', 'modify product'\n"
+        "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
+        "   - Any query primarily about products, pricing, or inventory\n"
+        "   - 'visualize product prices', 'chart of product distribution'\n"
+        "\n"
+        "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
+        "   - 'list customers', 'show customers', 'display customers'\n"
+        "   - 'customer information', 'customer details'\n"
+        "   - 'add customer', 'create customer', 'new customer'\n"
+        "   - 'update customer', 'change customer email', 'modify customer'\n"
+        "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
+        "   - Any query primarily about customers, names, or emails\n"
+        "   - 'visualize customer data', 'chart of customer distribution'\n"
+        "\n"
+        "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
+        "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
+        "   - 'sales report', 'revenue data', 'purchase history'\n"
+        "   - 'who bought what', 'customer purchases'\n"
+        "   - Cross-database queries combining customer + product + sales info\n"
+        "   - 'create sale', 'add sale', 'new transaction'\n"
+        "   - Any query asking for combined data from multiple tables\n"
+        "   - 'visualize sales', 'sales dashboard', 'chart sales trends'\n"
+        "   - 'sales by product', 'sales by customer', 'total sales by [anything]'\n"
+        "\n"
+        "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
+        "   - 'show care plans', 'list case notes', 'display care plans', 'care plan records'\n"
+        "   - 'list care plans with name John', 'care plans mentioning cancer'\n"
+        "   - 'show care plan without address', 'display only name and notes'\n"
+        "   - Any query related to healthcare records with Name, Address, Phone Number, Case Notes\n"
+        "   - 'visualize care plan data', 'chart of case types'\n\n"
 
-    "5. **CARE PLAN COLUMN FILTERING:**\n"
-    "   - If the user asks to 'show only name and notes', 'remove address', or 'exclude phone number'.\n"
-    "   - For EXCLUSION queries (exclude, remove, without, but not):\n"
-    "   - **Example Query:** 'show care plans without phone number and address'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude phone_number,address\"}}\n"
-    "   - **Example Query:** 'list care plans but exclude phone number and address'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude phone_number,address\"}}\n"
-    "   - **Example Query:** 'show care plans without address'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude address\"}}\n"
-    "   - For POSITIVE selection:\n"
-    "   - **Example Query:** 'show only name and case notes from care plans'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name,case_notes\"}}\n"
+        "**ETL & DISPLAY FORMATTING RULES:**\n"
+        "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
+        "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
 
-    "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
-    "   - For name-based searches, use the 'name' parameter directly\n"
-    "   - **Example Query:** 'show records in care plan where name is John'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"name\": \"John\"}}\n"
-    "   - **Example Query:** 'care plans for Emily'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"name\": \"Emily\"}}\n"
-    "   - For case notes searches, use where_clause with LIKE\n"
-    "   - **Example Query:** 'care plans mentioning cancer'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"case_notes LIKE '%cancer%'\"}}\n"
-    "   - **Example Query:** 'show care plans for address New York'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"address LIKE '%New York%'\"}}\n"
+        "1. **DECIMAL FORMATTING:**\n"
+        "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
+        "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
 
-    "7. **CARE PLAN COLUMN NAME MAPPING:**\n"
-    "   - 'name' → 'Name'\n"
-    "   - 'address' → 'Address'\n"
-    "   - 'phone number', 'phone' → 'PhoneNumber'\n"
-    "   - 'case notes', 'notes' → 'CaseNotes'\n"
-)
+        "2. **DATE FORMATTING:**\n"
+        "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
+        "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
+
+        "3. **NULL VALUE HANDLING:**\n"
+        "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
+        "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
+
+        "4. **STRING CONCATENATION:**\n"
+        "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
+        "   - Use: {\"display_format\": \"String Concatenation\"}\n"
+    )
 
     user_prompt = f"""User query: "{query}"
 
-Analyze the query step by step:
+    Analyze this query step by step:
 
-1. Is this a VISUALIZATION request? (Look for keywords: chart, graph, plot, visualize, dashboard)
-2. If YES to #1, what CHART TYPE is most appropriate?
-3. What is the PRIMARY INTENT? (product, customer, sales, or care plan operation)
-4. What ACTION is being requested? (create, read, update, delete, describe, visualize)
-5. What ENTITY NAME needs to be extracted? (for delete/update operations)
-6. What SPECIFIC COLUMNS are requested? (for read operations)
-7. What FILTER CONDITIONS are specified? (for read operations)
-8. What PARAMETERS need to be extracted from the natural language?
+    1. Is this a VISUALIZATION request? (Look for keywords: chart, graph, plot, visualize, dashboard)
+    2. If YES to #1, what CHART TYPE is most appropriate?
+    3. What is the PRIMARY DATA being requested? (sales, customers, products, care plans)
+    4. What field should be used for GROUPING (x-axis)? Look for "by [FIELD]" patterns
+    5. What field should be used for VALUES (y-axis)? 
+    6. What AGGREGATION method should be used? (sum, count, avg)
+    7. Which TOOL provides this data?
 
-VISUALIZATION REQUEST DETECTION:
-- If query contains words like: chart, graph, plot, visualize, dashboard → set "is_visualization": true and "action": "visualize"
-- Determine appropriate chart_type based on the query context
+    CRITICAL: For "sales by product" queries, use sales_crud tool with product_name as x_field!
+    CRITICAL: For "sales by customer" queries, use sales_crud tool with customer_name as x_field!
 
-Respond with the exact JSON format with properly extracted parameters including visualization flags."""
+    Respond with the exact JSON format including x_field, y_field, and aggregate parameters."""
 
     try:
         messages = [
@@ -1129,10 +1342,13 @@ Respond with the exact JSON format with properly extracted parameters including 
             except:
                 result = {
                     "tool": list(available_tools.keys())[0], 
-                    "action": "read", 
+                    "action": "visualize" if is_visualization_request else "read", 
                     "args": {},
                     "is_visualization": is_visualization_request,
-                    "chart_type": None
+                    "chart_type": "bar" if is_visualization_request else None,
+                    "x_field": None,
+                    "y_field": None,
+                    "aggregate": None
                 }
 
         # Ensure visualization flags are present
@@ -1158,209 +1374,237 @@ Respond with the exact JSON format with properly extracted parameters including 
         if result.get("is_visualization") and result.get("action") != "visualize":
             result["action"] = "visualize"
 
-        # Rest of the existing parsing logic...
-        # Normalize action names
-        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
-            result["action"] = "read"
+        # CRITICAL FIX: Override for specific patterns if LLM got it wrong
+        query_lower = query.lower()
+        if "sales by product" in query_lower or "total sales by product" in query_lower:
+            result["tool"] = "sales_crud"
+            result["x_field"] = "product_name"
+            result["y_field"] = "total_price" 
+            result["aggregate"] = "sum"
+            print(f"DEBUG: Detected 'sales by product' pattern - overriding to use product_name grouping")
+        elif "sales by customer" in query_lower or "total sales by customer" in query_lower:
+            result["tool"] = "sales_crud"
+            result["x_field"] = "customer_name"
+            result["y_field"] = "total_price"
+            result["aggregate"] = "sum"
+            print(f"DEBUG: Detected 'sales by customer' pattern - overriding to use customer_name grouping")
+        elif "customer distribution" in query_lower or "visualize customer" in query_lower:
+            result["tool"] = "sqlserver_crud"
+            result["x_field"] = "Name"
+            result["y_field"] = "Id"
+            result["aggregate"] = "count"
+            print(f"DEBUG: Detected 'customer distribution' pattern")
+        elif "product" in query_lower and is_visualization_request and "sales" not in query_lower:
+            result["tool"] = "postgresql_crud"
+            result["x_field"] = "name"
+            result["y_field"] = "price"
+            result["aggregate"] = "avg"
+            print(f"DEBUG: Detected 'product visualization' pattern")
 
-        # ENHANCED parameter extraction for DELETE and UPDATE operations
-        if result.get("action") in ["delete", "update"]:
-            args = result.get("args", {})
-            
-            # Extract entity name for delete/update operations if not already extracted
-            if "name" not in args:
-                import re
-                
-                # Enhanced regex patterns for delete operations
-                delete_patterns = [
-                    r'(?:delete|remove)\s+(?:product\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
-                    r'(?:delete|remove)\s+(?:customer\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
-                    r'(?:delete|remove)\s+([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)'
-                ]
-                
-                # Enhanced regex patterns for update operations
-                update_patterns = [
-                    r'(?:update|change|set)\s+(?:price\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
-                    r'(?:update|change|set)\s+(?:email\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
-                    r'(?:update|change|set)\s+([A-Za-z][A-Za-z0-9\s]*?)\s+(?:price|email)\s+(?:to|=)',
-                ]
-                
-                all_patterns = delete_patterns + update_patterns
-                
-                for pattern in all_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        extracted_name = match.group(1).strip()
-                        # Clean up common words that might be captured
-                        stop_words = ['product', 'customer', 'price', 'email', 'to', 'of', 'the', 'a', 'an']
-                        name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
-                        if name_words:
-                            args["name"] = ' '.join(name_words)
-                            print(f"DEBUG: Extracted name '{args['name']}' from query '{query}'")
-                            break
-            
-            # Extract new_price for product updates
-            if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
-                import re
-                price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
-                if price_match:
-                    args["new_price"] = float(price_match.group(1))
-                    print(f"DEBUG: Extracted new_price '{args['new_price']}' from query '{query}'")
-            
-            # Extract new_email for customer updates
-            if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
-                import re
-                email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
-                if email_match:
-                    args["new_email"] = email_match.group(1)
-                    print(f"DEBUG: Extracted new_email '{args['new_email']}' from query '{query}'")
-            
-            result["args"] = args
+        # Rest of the existing parsing logic for non-visualization requests...
+        if not result.get("is_visualization"):
+            # Normalize action names
+            if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
+                result["action"] = "read"
 
-        # Enhanced parameter extraction for create operations
-        elif result.get("action") == "create":
-            args = result.get("args", {})
-            
-            # Extract name and email from query if not already extracted
-            if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
-                # Try to extract name and email using regex patterns
-                import re
+            # ENHANCED parameter extraction for DELETE and UPDATE operations
+            if result.get("action") in ["delete", "update"]:
+                args = result.get("args", {})
                 
-                # Extract email
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
-                if email_match and "email" not in args:
-                    args["email"] = email_match.group(0)
-                
-                # Extract name (everything between 'customer' and 'with' or before email)
+                # Extract entity name for delete/update operations if not already extracted
                 if "name" not in args:
-                    # Pattern 1: "create customer [Name] with [email]"
-                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
-                    if not name_match:
-                        # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
-                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
-                    if not name_match:
-                        # Pattern 3: Extract everything before the email
-                        if email_match:
-                            name_part = query[:email_match.start()].strip()
-                            name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
+                    import re
                     
-                    if name_match:
-                        extracted_name = name_match.group(1).strip()
-                        # Clean up common words
-                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name, flags=re.IGNORECASE).strip()
-                        if extracted_name:
-                            args["name"] = extracted_name
-            
-            result["args"] = args
+                    # Enhanced regex patterns for delete operations
+                    delete_patterns = [
+                        r'(?:delete|remove)\s+(?:product\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
+                        r'(?:delete|remove)\s+(?:customer\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
+                        r'(?:delete|remove)\s+([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)'
+                    ]
+                    
+                    # Enhanced regex patterns for update operations
+                    update_patterns = [
+                        r'(?:update|change|set)\s+(?:price\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
+                        r'(?:update|change|set)\s+(?:email\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
+                        r'(?:update|change|set)\s+([A-Za-z][A-Za-z0-9\s]*?)\s+(?:price|email)\s+(?:to|=)',
+                    ]
+                    
+                    all_patterns = delete_patterns + update_patterns
+                    
+                    for pattern in all_patterns:
+                        match = re.search(pattern, query, re.IGNORECASE)
+                        if match:
+                            extracted_name = match.group(1).strip()
+                            # Clean up common words that might be captured
+                            stop_words = ['product', 'customer', 'price', 'email', 'to', 'of', 'the', 'a', 'an']
+                            name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
+                            if name_words:
+                                args["name"] = ' '.join(name_words)
+                                print(f"DEBUG: Extracted name '{args['name']}' from query '{query}'")
+                                break
+                
+                # Extract new_price for product updates
+                if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
+                    import re
+                    price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
+                    if price_match:
+                        args["new_price"] = float(price_match.group(1))
+                        print(f"DEBUG: Extracted new_price '{args['new_price']}' from query '{query}'")
+                
+                # Extract new_email for customer updates
+                if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
+                    import re
+                    email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
+                    if email_match:
+                        args["new_email"] = email_match.group(1)
+                        print(f"DEBUG: Extracted new_email '{args['new_email']}' from query '{query}'")
+                
+                result["args"] = args
 
-        # Enhanced parameter extraction for read operations with columns and where_clause
-        elif result.get("action") == "read" and result.get("tool") == "sales_crud":
-            args = result.get("args", {})
-            
-            # Extract columns if not already extracted
-            if "columns" not in args:
-                import re
+            # Enhanced parameter extraction for create operations
+            elif result.get("action") == "create":
+                args = result.get("args", {})
                 
-                # Look for column specification patterns
-                column_patterns = [
-                    r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
-                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
-                    r'display\s+(.+?)(?:\s+from|\s*$)',
-                ]
-                
-                for pattern in column_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        columns_text = match.group(1).strip()
+                # Extract name and email from query if not already extracted
+                if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
+                    # Try to extract name and email using regex patterns
+                    import re
+                    
+                    # Extract email
+                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
+                    if email_match and "email" not in args:
+                        args["email"] = email_match.group(0)
+                    
+                    # Extract name (everything between 'customer' and 'with' or before email)
+                    if "name" not in args:
+                        # Pattern 1: "create customer [Name] with [email]"
+                        name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
+                        if not name_match:
+                            # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
+                            name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
+                        if not name_match:
+                            # Pattern 3: Extract everything before the email
+                            if email_match:
+                                name_part = query[:email_match.start()].strip()
+                                name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
                         
-                        # Clean up and standardize column names
-                        if 'and' in columns_text or ',' in columns_text:
-                            # Multiple columns
-                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
-                            cleaned_columns = []
+                        if name_match:
+                            extracted_name = name_match.group(1).strip()
+                            # Clean up common words
+                            extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name, flags=re.IGNORECASE).strip()
+                            if extracted_name:
+                                args["name"] = extracted_name
+                
+                result["args"] = args
+
+            # Enhanced parameter extraction for read operations with columns and where_clause
+            elif result.get("action") == "read" and result.get("tool") == "sales_crud":
+                args = result.get("args", {})
+                
+                # Extract columns if not already extracted
+                if "columns" not in args:
+                    import re
+                    
+                    # Look for column specification patterns
+                    column_patterns = [
+                        r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
+                        r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
+                        r'display\s+(.+?)(?:\s+from|\s*$)',
+                    ]
+                    
+                    for pattern in column_patterns:
+                        match = re.search(pattern, query, re.IGNORECASE)
+                        if match:
+                            columns_text = match.group(1).strip()
                             
-                            for col in columns_list:
-                                col = col.strip().lower().replace(' ', '_')
-                                # Map common variations
+                            # Clean up and standardize column names
+                            if 'and' in columns_text or ',' in columns_text:
+                                # Multiple columns
+                                columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
+                                cleaned_columns = []
+                                
+                                for col in columns_list:
+                                    col = col.strip().lower().replace(' ', '_')
+                                    # Map common variations
+                                    if col in ['name', 'customer']:
+                                        cleaned_columns.append('customer_name')
+                                    elif col in ['price', 'total', 'amount']:
+                                        cleaned_columns.append('total_price')
+                                    elif col in ['product']:
+                                        cleaned_columns.append('product_name')
+                                    elif col in ['date']:
+                                        cleaned_columns.append('sale_date')
+                                    elif col in ['email']:
+                                        cleaned_columns.append('customer_email')
+                                    else:
+                                        cleaned_columns.append(col)
+                                
+                                if cleaned_columns:
+                                    args["columns"] = ','.join(cleaned_columns)
+                            else:
+                                # Single column
+                                col = columns_text.strip().lower().replace(' ', '_')
                                 if col in ['name', 'customer']:
-                                    cleaned_columns.append('customer_name')
+                                    args["columns"] = 'customer_name'
                                 elif col in ['price', 'total', 'amount']:
-                                    cleaned_columns.append('total_price')
+                                    args["columns"] = 'total_price'
                                 elif col in ['product']:
-                                    cleaned_columns.append('product_name')
+                                    args["columns"] = 'product_name'
                                 elif col in ['date']:
-                                    cleaned_columns.append('sale_date')
+                                    args["columns"] = 'sale_date'
                                 elif col in ['email']:
-                                    cleaned_columns.append('customer_email')
+                                    args["columns"] = 'customer_email'
                                 else:
-                                    cleaned_columns.append(col)
+                                    args["columns"] = col
+                            break
+                
+                # Extract where_clause if not already extracted
+                if "where_clause" not in args:
+                    import re
+                    
+                    # Look for filtering conditions
+                    where_patterns = [
+                        r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
+                        r'(?:with|where)\s+total[_\s]*price[_\s]*(?:below|less\s+than|under|<)\s*\$?(\d+(?:\.\d+)?)',
+                        r'(?:with|where)\s+total[_\s]*price[_\s]*(?:equal[s]?|is|=)\s*\$?(\d+(?:\.\d+)?)',
+                        r'(?:with|where)\s+quantity[_\s]*(?:>|above|greater\s+than|more\s+than)\s*(\d+)',
+                        r'(?:with|where)\s+quantity[_\s]*(?:<|below|less\s+than|under)\s*(\d+)',
+                        r'(?:with|where)\s+quantity[_\s]*(?:=|equal[s]?|is)\s*(\d+)',
+                        r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
+                        r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
+                    ]
+                    
+                    for i, pattern in enumerate(where_patterns):
+                        match = re.search(pattern, query, re.IGNORECASE)
+                        if match:
+                            value = match.group(1).strip()
                             
-                            if cleaned_columns:
-                                args["columns"] = ','.join(cleaned_columns)
-                        else:
-                            # Single column
-                            col = columns_text.strip().lower().replace(' ', '_')
-                            if col in ['name', 'customer']:
-                                args["columns"] = 'customer_name'
-                            elif col in ['price', 'total', 'amount']:
-                                args["columns"] = 'total_price'
-                            elif col in ['product']:
-                                args["columns"] = 'product_name'
-                            elif col in ['date']:
-                                args["columns"] = 'sale_date'
-                            elif col in ['email']:
-                                args["columns"] = 'customer_email'
-                            else:
-                                args["columns"] = col
-                        break
-            
-            # Extract where_clause if not already extracted
-            if "where_clause" not in args:
-                import re
+                            if i <= 2:  # total_price conditions
+                                if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
+                                    args["where_clause"] = f"total_price > {value}"
+                                elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
+                                    args["where_clause"] = f"total_price < {value}"
+                                else:
+                                    args["where_clause"] = f"total_price = {value}"
+                            elif i <= 5:  # quantity conditions
+                                if 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
+                                    args["where_clause"] = f"quantity > {value}"
+                                elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
+                                    args["where_clause"] = f"quantity < {value}"
+                                else:
+                                    args["where_clause"] = f"quantity = {value}"
+                            elif i == 6:  # customer name
+                                args["where_clause"] = f"customer_name = '{value}'"
+                            elif i == 7:  # product name
+                                args["where_clause"] = f"product_name = '{value}'"
+                            break
                 
-                # Look for filtering conditions
-                where_patterns = [
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:below|less\s+than|under|<)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:equal[s]?|is|=)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:>|above|greater\s+than|more\s+than)\s*(\d+)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:<|below|less\s+than|under)\s*(\d+)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:=|equal[s]?|is)\s*(\d+)',
-                    r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
-                    r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
-                ]
-                
-                for i, pattern in enumerate(where_patterns):
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        value = match.group(1).strip()
-                        
-                        if i <= 2:  # total_price conditions
-                            if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
-                                args["where_clause"] = f"total_price > {value}"
-                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
-                                args["where_clause"] = f"total_price < {value}"
-                            else:
-                                args["where_clause"] = f"total_price = {value}"
-                        elif i <= 5:  # quantity conditions
-                            if 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
-                                args["where_clause"] = f"quantity > {value}"
-                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
-                                args["where_clause"] = f"quantity < {value}"
-                            else:
-                                args["where_clause"] = f"quantity = {value}"
-                        elif i == 6:  # customer name
-                            args["where_clause"] = f"customer_name = '{value}'"
-                        elif i == 7:  # product name
-                            args["where_clause"] = f"product_name = '{value}'"
-                        break
-            
-            result["args"] = args
+                result["args"] = args
 
-        # Validate and clean args
-        if "args" in result and isinstance(result["args"], dict):
-            cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
-            result["args"] = cleaned_args
+            # Validate and clean args
+            if "args" in result and isinstance(result["args"], dict):
+                cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
+                result["args"] = cleaned_args
 
         # Validate tool selection
         if "tool" in result and result["tool"] not in available_tools:
@@ -1378,6 +1622,9 @@ Respond with the exact JSON format with properly extracted parameters including 
             "args": {},
             "is_visualization": False,
             "chart_type": None,
+            "x_field": None,
+            "y_field": None,
+            "aggregate": None,
             "error": f"Failed to parse query: {str(e)}"
         }
 
@@ -2284,4 +2531,3 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
-
