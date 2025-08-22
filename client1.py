@@ -370,7 +370,7 @@ def _clean_json(raw: str) -> str:
 async def _discover_tools() -> dict:
     """Discover available tools from the MCP server"""
     try:
-        transport = StreamableHttpTransport(f"{st.session_state.get('MCP_SERVER_URL', 'http://localhost:8000')}/mcp")
+        transport = StreamableHttpTransport(f"{st.session_state.get('https://mcp-znag.onrender.com/', 'http://localhost:8000')}/mcp")
         async with Client(transport) as client:
             tools = await client.list_tools()
             return {tool.name: tool.description for tool in tools}
@@ -2284,3 +2284,4 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
