@@ -13,3 +13,4 @@ python-dotenv
 asyncio
 langchain_groq
 langchain_core
+plotly
