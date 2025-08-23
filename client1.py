@@ -1193,7 +1193,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         "RESPONSE FORMAT:\n"
         "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object, \"is_visualization\": boolean, \"chart_type\": string|null, \"x_field\": string|null, \"y_field\": string|null, \"aggregate\": string|null}\n\n"
 
-        THUMBRULE: ALWAYS ANALYSE THE QUERY - IS IT A QUERY FOR CRUD OPERATIONS OR A QUERY FOR DATA VISUALIZATION?
+        "THUMBRULE: ALWAYS ANALYSE THE QUERY - IS IT A QUERY FOR CRUD OPERATIONS OR A QUERY FOR DATA VISUALIZATION?\n"
 
         
         "CRITICAL DATA SOURCE ANALYSIS:\n"
@@ -2536,5 +2536,6 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
 
 
