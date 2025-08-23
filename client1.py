@@ -309,7 +309,6 @@ def generate_tool_descriptions(tools_dict: dict) -> str:
 
 
 # ========== VISUALIZATION FUNCTIONS ==========
-# Add this function to detect visualization types
 def detect_visualization_type(query: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Detect visualization type and subject from natural language query.
@@ -360,43 +359,7 @@ def detect_visualization_type(query: str) -> Tuple[Optional[str], Optional[str]]
                 chart_type = "histogram"
     
     return chart_type, data_subject
-	
 
-def create_visualization(df: pd.DataFrame, chart_type: str, x_col: str, y_col: str, 
-                         title: str, color_col: str = None) -> go.Figure:
-    """Create a visualization based on the specified chart type"""
-    if df.empty or x_col not in df.columns or y_col not in df.columns:
-        return None
-    
-    try:
-        if chart_type == "bar":
-            if color_col and color_col in df.columns:
-                fig = px.bar(df, x=x_col, y=y_col, title=title, color=color_col)
-            else:
-                fig = px.bar(df, x=x_col, y=y_col, title=title)
-        elif chart_type == "pie":
-            fig = px.pie(df, names=x_col, values=y_col, title=title)
-        elif chart_type == "line":
-            if color_col and color_col in df.columns:
-                fig = px.line(df, x=x_col, y=y_col, title=title, color=color_col)
-            else:
-                fig = px.line(df, x=x_col, y=y_col, title=title)
-        elif chart_type == "scatter":
-            if color_col and color_col in df.columns:
-                fig = px.scatter(df, x=x_col, y=y_col, title=title, color=color_col)
-            else:
-                fig = px.scatter(df, x=x_col, y=y_col, title=title)
-        elif chart_type == "histogram":
-            fig = px.histogram(df, x=x_col, title=title)
-        else:
-            # Default to bar chart
-            fig = px.bar(df, x=x_col, y=y_col, title=title)
-        
-        fig.update_layout(height=400)
-        return fig
-    except Exception as e:
-        print(f"Error creating visualization: {e}")
-        return None
 
 def create_sales_visualizations(df, chart_type=None):
     """Create visualizations for sales data with optional specific chart type"""
@@ -911,28 +874,6 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
     """Enhanced parse user query with better DELETE operation handling"""
-    # First, check if this is a visualization-specific request
-    chart_type, data_subject = detect_visualization_type(query)
-    
-    # If it's a visualization request, route to the appropriate tool
-    if chart_type and data_subject:
-        tool_mapping = {
-            "sales": "sales_crud",
-            "customer": "sqlserver_crud", 
-            "product": "postgresql_crud",
-            "careplan": "careplan_crud"
-        }
-        
-        if data_subject in tool_mapping and tool_mapping[data_subject] in available_tools:
-            return {
-                "tool": tool_mapping[data_subject],
-                "action": "read", 
-                "args": {
-                    "visualise": True,
-                    "chart_type": chart_type,
-                    "viz_query": query  # Store the original query for context
-                }
-            }
 
     if not available_tools:
         return {"error": "No tools available"}
@@ -1653,24 +1594,24 @@ if application == "MCP Application":
                 st.table(df)
 
                 # Check if visualization is requested
-                request_args = msg.get("args", {})
+                request_args = msg.get("args",{})
                 if request_args.get('visualise', False):
                     st.markdown("### 📊 Visualisations")
+
+                    # Get chart type if specified
+                    chart_type = request_args.get('chart_type')
+                    viz_query = request_args.get('viz_query', '')
         
-                # Get chart type if specified
-                chart_type = request_args.get('chart_type')
-                viz_query = request_args.get('viz_query', '')
-        
-                # Create visualizations based on tool type and requested chart
-                if tool == "sales_crud":
-                    create_sales_visualizations(df, chart_type)
-                elif tool == "sqlserver_crud":
-                    create_customer_visualizations(df, chart_type)
-                elif tool == "postgresql_crud":
-                    create_product_visualizations(df, chart_type)
-                elif tool == "careplan_crud":
-                    create_careplan_visualizations(df, chart_type)
-                
+                    # Create visualizations based on tool type and requested chart
+                    if tool == "sales_crud":
+                        create_sales_visualizations(df, chart_type)
+                    elif tool == "sqlserver_crud":
+                        create_customer_visualizations(df, chart_type)
+                    elif tool == "postgresql_crud":
+                        create_product_visualizations(df, chart_type)
+                    elif tool == "careplan_crud":
+                        create_careplan_visualizations(df, chart_type)
+
                 # Check if this is ETL formatted data by looking for specific formatting
                 request_args = msg.get("args", {})
                 if request_args.get('visualise', False):
