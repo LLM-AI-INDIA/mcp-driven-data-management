@@ -1187,7 +1187,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     is_visualization_request = any(keyword in query.lower() for keyword in visualization_keywords)
 
     system_prompt = (
-        "You are an intelligent database router for CRUD operations and data visualization. "
+        "You are an intelligent database router for CRUD operations and data visualization.\n"
         "Your job is to analyze the user's query and select the most appropriate tool and extract the correct grouping field.\n\n"
 
         "RESPONSE FORMAT:\n"
@@ -2536,4 +2536,5 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
 
