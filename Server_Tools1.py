@@ -534,8 +534,8 @@ def find_product_by_name(name: str) -> dict:
 # ——————————————————————————————————————
 @mcp.tool()
 async def data_visualization(
-        chart_type: str,
-        data_source: str,
+        chart_type: Optional[str] = "bar",
+        data_source: Optional[str] = "sales", # FIX: Made optional with a default value
         x_axis: str = None,
         y_axis: str = None,
         group_by: str = None,
@@ -547,40 +547,66 @@ async def data_visualization(
     """Creates data visualizations from database tables. Supports bar, line, pie, scatter, and multi-chart dashboards."""
     
     try:
+        # FIX: Normalize and validate chart_type and data_source
+        final_chart_type = chart_type.lower().strip() if chart_type and isinstance(chart_type, str) else "bar"
+        final_data_source = data_source.lower().strip() if data_source and isinstance(data_source, str) else "sales"
+        
+        supported_types = ["bar", "line", "pie", "scatter", "multi"]
+        if final_chart_type not in supported_types:
+            final_chart_type = "bar"
+        
+        print(f"DEBUG: Processing visualization - Chart Type: {final_chart_type}, Data Source: {final_data_source}")
+        
         # Determine which CRUD tool to use based on data_source
-        if data_source in ["sales", "sales_data", "transactions"]:
+        if final_data_source in ["sales", "sales_data", "transactions"]:
             crud_result = await sales_crud("read", limit=limit)
-        elif data_source in ["customers", "customer", "client"]:
+        elif final_data_source in ["customers", "customer", "client"]:
             crud_result = await sqlserver_crud("read", limit=limit)
-        elif data_source in ["products", "product", "inventory"]:
+        elif final_data_source in ["products", "product", "inventory"]:
             crud_result = await postgresql_crud("read", limit=limit)
-        elif data_source in ["careplan", "care_plan", "healthcare"]:
+        elif final_data_source in ["careplan", "care_plan", "healthcare"]:
             crud_result = await careplan_crud("read", limit=limit)
         else:
             crud_result = await sales_crud("read", limit=limit)  # Default to sales
 
         if not crud_result or not crud_result.get("result"):
-            return {"error": "No data found", "chart_config": None}
+            return {
+                "error": "No data found for visualization",
+                "chart_config": None,
+                "chart_type": final_chart_type,
+                "data_source": final_data_source,
+                "success": False
+            }
 
         data = crud_result["result"]
         
-        # Process data based on chart type
-        if chart_type == "bar":
-            chart_config = create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_function, title)
-        elif chart_type == "line":
-            chart_config = create_line_chart_config_server(data, x_axis, y_axis, group_by, title)
-        elif chart_type == "pie":
-            chart_config = create_pie_chart_config_server(data, group_by, y_axis, aggregate_function, title)
-        elif chart_type == "scatter":
-            chart_config = create_scatter_chart_config_server(data, x_axis, y_axis, title)
-        elif chart_type == "multi":
-            chart_config = create_multi_dashboard_config_server(data, title)
-        else:
-            return {"error": f"Unsupported chart type: {chart_type}", "chart_config": None}
+        try:
+            # Process data based on chart type
+            if final_chart_type == "bar":
+                chart_config = create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_function, title)
+            elif final_chart_type == "line":
+                chart_config = create_line_chart_config_server(data, x_axis, y_axis, group_by, title)
+            elif final_chart_type == "pie":
+                chart_config = create_pie_chart_config_server(data, group_by, y_axis, aggregate_function, title)
+            elif final_chart_type == "scatter":
+                chart_config = create_scatter_chart_config_server(data, x_axis, y_axis, title)
+            elif final_chart_type == "multi":
+                chart_config = create_multi_dashboard_config_server(data, title)
+            else:
+                chart_config = create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_function, title)
+
+        except Exception as chart_error:
+            return {
+                "error": f"Chart creation failed: {str(chart_error)}",
+                "chart_config": None,
+                "chart_type": final_chart_type,
+                "data_source": final_data_source,
+                "success": False
+            }
 
         return {
-            "chart_type": chart_type,
-            "data_source": data_source,
+            "chart_type": final_chart_type,
+            "data_source": final_data_source,
             "chart_config": chart_config,
             "data_count": len(data),
             "sql": crud_result.get("sql", ""),
@@ -588,10 +614,20 @@ async def data_visualization(
         }
 
     except Exception as e:
-        return {"error": f"Visualization error: {str(e)}", "chart_config": None}
+        print(f"DEBUG: Visualization error: {str(e)}")
+        return {
+            "error": f"Visualization error: {str(e)}",
+            "chart_config": None,
+            "chart_type": "bar",
+            "data_source": "sales",
+            "success": False
+        }
 
 def create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_function, title):
-    """Create bar chart configuration"""
+    """Create bar chart configuration with enhanced validation"""
+    
+    if not data or len(data) == 0:
+        raise ValueError("No data available for bar chart")
     
     # Auto-detect axes if not provided
     if not x_axis:
@@ -617,6 +653,8 @@ def create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_fun
                 if isinstance(value, (int, float)):
                     y_axis = key
                     break
+            if not y_axis:
+                y_axis = list(data[0].keys())[1] if len(data[0].keys()) > 1 else list(data[0].keys())[0]
     
     # Aggregate data
     aggregated = {}
@@ -637,7 +675,7 @@ def create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_fun
     chart_data = [{"x": k, "y": v} for k, v in aggregated.items()]
     
     return {
-        "chart_type": "bar",
+        "type": "bar",
         "data": chart_data,
         "layout": {
             "title": title or f"{aggregate_function.title()} of {y_axis} by {x_axis}",
@@ -649,7 +687,10 @@ def create_bar_chart_config_server(data, x_axis, y_axis, group_by, aggregate_fun
     }
 
 def create_line_chart_config_server(data, x_axis, y_axis, group_by, title):
-    """Create line chart configuration"""
+    """Create line chart configuration with enhanced validation"""
+    
+    if not data or len(data) == 0:
+        raise ValueError("No data available for line chart")
     
     # Auto-detect axes for time series
     if not x_axis:
@@ -670,13 +711,15 @@ def create_line_chart_config_server(data, x_axis, y_axis, group_by, title):
                 if isinstance(value, (int, float)):
                     y_axis = key
                     break
+            if not y_axis:
+                y_axis = list(data[0].keys())[1] if len(data[0].keys()) > 1 else list(data[0].keys())[0]
     
     # Sort data by x_axis for line chart
     sorted_data = sorted(data, key=lambda x: x.get(x_axis, ""))
-    chart_data = [{"x": row.get(x_axis), "y": float(row.get(y_axis, 0))} for row in sorted_data]
+    chart_data = [{"x": row.get(x_axis), "y": float(row.get(y_axis, 0)) if row.get(y_axis) is not None else 0} for row in sorted_data]
     
     return {
-        "chart_type": "line",
+        "type": "line",
         "data": chart_data,
         "layout": {
             "title": title or f"{y_axis.replace('_', ' ').title()} Over {x_axis.replace('_', ' ').title()}",
@@ -687,8 +730,13 @@ def create_line_chart_config_server(data, x_axis, y_axis, group_by, title):
         "config": {"displayModeBar": True, "responsive": True}
     }
 
+
+
 def create_pie_chart_config_server(data, group_by, value_field, aggregate_function, title):
-    """Create pie chart configuration"""
+    """Create pie chart configuration with enhanced validation"""
+    
+    if not data or len(data) == 0:
+        raise ValueError("No data available for pie chart")
     
     if not group_by:
         if "customer_name" in data[0]:
@@ -708,6 +756,8 @@ def create_pie_chart_config_server(data, group_by, value_field, aggregate_functi
                 if isinstance(value, (int, float)):
                     value_field = key
                     break
+            if not value_field:
+                value_field = list(data[0].keys())[1] if len(data[0].keys()) > 1 else list(data[0].keys())[0]
     
     # Aggregate data for pie chart
     aggregated = {}
@@ -727,7 +777,7 @@ def create_pie_chart_config_server(data, group_by, value_field, aggregate_functi
     values = list(aggregated.values())
     
     return {
-        "chart_type": "pie",
+        "type": "pie",
         "data": {
             "labels": labels,
             "values": values
@@ -739,8 +789,12 @@ def create_pie_chart_config_server(data, group_by, value_field, aggregate_functi
         "config": {"displayModeBar": True, "responsive": True}
     }
 
+
 def create_scatter_chart_config_server(data, x_axis, y_axis, title):
-    """Create scatter plot configuration"""
+    """Create scatter plot configuration with enhanced validation"""
+    
+    if not data or len(data) == 0:
+        raise ValueError("No data available for scatter plot")
     
     # Auto-detect numeric fields for scatter plot
     numeric_fields = []
@@ -753,7 +807,10 @@ def create_scatter_chart_config_server(data, x_axis, y_axis, title):
     if not y_axis and len(numeric_fields) > 1:
         y_axis = numeric_fields[1]
     elif not y_axis:
-        y_axis = numeric_fields[0] if numeric_fields else list(data[0].keys())[1]
+        y_axis = numeric_fields[0] if numeric_fields else list(data[0].keys())[1] if len(data[0].keys()) > 1 else list(data[0].keys())[0]
+    
+    if not x_axis:
+        x_axis = list(data[0].keys())[0]
     
     chart_data = []
     for row in data:
@@ -766,7 +823,7 @@ def create_scatter_chart_config_server(data, x_axis, y_axis, title):
                 continue
     
     return {
-        "chart_type": "scatter",
+        "type": "scatter",
         "data": chart_data,
         "layout": {
             "title": title or f"{y_axis.replace('_', ' ').title()} vs {x_axis.replace('_', ' ').title()}",
@@ -778,13 +835,19 @@ def create_scatter_chart_config_server(data, x_axis, y_axis, title):
     }
 
 def create_multi_dashboard_config_server(data, title):
-    """Create multiple charts for dashboard view"""
+    """Create multiple charts for dashboard view with enhanced validation"""
+    
+    if not data or len(data) == 0:
+        raise ValueError("No data available for dashboard")
     
     charts = []
     
     # Chart 1: Bar chart of totals
     if "total_price" in data[0] and "customer_name" in data[0]:
-        charts.append(create_bar_chart_config_server(data, "customer_name", "total_price", None, "sum", "Sales by Customer"))
+        try:
+            charts.append(create_bar_chart_config_server(data, "customer_name", "total_price", None, "sum", "Sales by Customer"))
+        except Exception as e:
+            print(f"DEBUG: Failed to create bar chart for dashboard: {e}")
     
     # Chart 2: Line chart over time if date field exists
     date_field = None
@@ -794,22 +857,39 @@ def create_multi_dashboard_config_server(data, title):
             break
     
     if date_field and "total_price" in data[0]:
-        charts.append(create_line_chart_config_server(data, date_field, "total_price", None, "Sales Trend Over Time"))
+        try:
+            charts.append(create_line_chart_config_server(data, date_field, "total_price", None, "Sales Trend Over Time"))
+        except Exception as e:
+            print(f"DEBUG: Failed to create line chart for dashboard: {e}")
     
     # Chart 3: Pie chart of distribution
     if "product_name" in data[0] and "quantity" in data[0]:
-        charts.append(create_pie_chart_config_server(data, "product_name", "quantity", "sum", "Product Sales Distribution"))
+        try:
+            charts.append(create_pie_chart_config_server(data, "product_name", "quantity", "sum", "Product Sales Distribution"))
+        except Exception as e:
+            print(f"DEBUG: Failed to create pie chart for dashboard: {e}")
+    
+    # If no charts were successfully created, create a simple bar chart as fallback
+    if not charts:
+        try:
+            # Use first two fields as fallback
+            keys = list(data[0].keys())
+            x_field = keys[0]
+            y_field = keys[1] if len(keys) > 1 else keys[0]
+            charts.append(create_bar_chart_config_server(data, x_field, y_field, None, "sum", "Data Overview"))
+        except Exception as e:
+            print(f"DEBUG: Failed to create fallback chart for dashboard: {e}")
+            raise ValueError("Unable to create any charts for dashboard")
     
     return {
-        "chart_type": "multi",
+        "type": "multi",
         "charts": charts,
         "layout": {
-            "title": title or "Sales Analytics Dashboard",
+            "title": title or "Analytics Dashboard",
             "grid": {"rows": 2, "columns": 2}
         },
         "config": {"displayModeBar": True, "responsive": True}
     }
-
 # ——————————————————————————————————————
 # 8. Enhanced MySQL CRUD Tool (Customers) with Smart Name Resolution
 # ——————————————————————————————————————
