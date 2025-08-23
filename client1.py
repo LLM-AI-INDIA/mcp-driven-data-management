@@ -319,31 +319,48 @@ def detect_visualization_type(query: str) -> Tuple[Optional[str], Optional[str]]
     
     # Chart type detection
     chart_type = None
-    if any(term in query_lower for term in ["pie chart", "pie graph"]):
+    if any(term in query_lower for term in ["pie chart", "pie graph", "distribution"]):
         chart_type = "pie"
-    elif any(term in query_lower for term in ["bar chart", "bar graph", "bar plot"]):
+    elif any(term in query_lower for term in ["bar chart", "bar graph", "bar plot", "bars"]):
         chart_type = "bar"
-    elif any(term in query_lower for term in ["line chart", "line graph", "line plot"]):
+    elif any(term in query_lower for term in ["line chart", "line graph", "line plot", "trend"]):
         chart_type = "line"
-    elif any(term in query_lower for term in ["scatter plot", "scatter chart"]):
+    elif any(term in query_lower for term in ["scatter plot", "scatter chart", "scatter"]):
         chart_type = "scatter"
-    elif any(term in query_lower for term in ["histogram", "distribution"]):
+    elif any(term in query_lower for term in ["histogram", "distribution chart"]):
         chart_type = "histogram"
     
-    # Data subject detection
+    # Data subject detection with more specific patterns
     data_subject = None
-    if any(term in query_lower for term in ["sales", "revenue", "transaction"]):
+    if any(term in query_lower for term in ["sales", "revenue", "transaction", "purchase"]):
         data_subject = "sales"
-    elif any(term in query_lower for term in ["customer", "client"]):
+    elif any(term in query_lower for term in ["customer", "client", "buyer"]):
         data_subject = "customer"
-    elif any(term in query_lower for term in ["product", "item", "inventory"]):
+    elif any(term in query_lower for term in ["product", "item", "inventory", "price", "widget", "gadget"]):
         data_subject = "product"
-    elif any(term in query_lower for term in ["care plan", "patient", "case notes"]):
+    elif any(term in query_lower for term in ["care plan", "patient", "case notes", "medical", "healthcare"]):
         data_subject = "careplan"
+    
+    # Additional detection for more specific product requests
+    if data_subject == "product":
+        if any(term in query_lower for term in ["price", "cost", "value"]):
+            # Force bar chart for price comparisons
+            if not chart_type:
+                chart_type = "bar"
+        elif any(term in query_lower for term in ["distribution", "spread"]):
+            # Force histogram for distribution requests
+            if not chart_type:
+                chart_type = "histogram"
+    
+    # Additional detection for care plan requests
+    if data_subject == "careplan":
+        if any(term in query_lower for term in ["notes", "documentation", "case notes"]):
+            # Force histogram for notes length distribution
+            if not chart_type:
+                chart_type = "histogram"
     
     return chart_type, data_subject
 	
-
 
 def create_visualization(df: pd.DataFrame, chart_type: str, x_col: str, y_col: str, 
                          title: str, color_col: str = None) -> go.Figure:
@@ -490,60 +507,114 @@ def create_customer_visualizations(df, chart_type=None):
                     st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('customer_email_pie'))
 
 
-
-def create_product_visualizations(df):
-    """Create visualizations for product data"""
+def create_product_visualizations(df, chart_type=None):
+    """Create visualizations for product data with optional specific chart type"""
     if df.empty:
         return
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if 'name' in df.columns and 'price' in df.columns:
-            # Product prices
-            fig = px.bar(df, x='name', y='price',
-                         title='Product Prices',
-                         color='price',
-                         color_continuous_scale='plasma')
+    
+    if chart_type:
+        if chart_type == "bar" and 'name' in df.columns and 'price' in df.columns:
+            fig = create_visualization(df, "bar", "name", "price", 
+                                     "Product Prices", "price")
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_prices_bar'))
+        
+        elif chart_type == "pie" and 'name' in df.columns and 'price' in df.columns:
+            # For pie charts, we need to aggregate by product name
+            product_prices = df.groupby('name')['price'].mean().reset_index()
+            fig = create_visualization(product_prices, "pie", "name", "price", 
+                                     "Average Product Prices")
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_prices_pie'))
+        
+        elif chart_type == "histogram" and 'price' in df.columns:
+            fig = create_visualization(df, "histogram", "price", None, 
+                                     "Price Distribution")
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_price_hist'))
+        
+        elif chart_type == "scatter" and 'name' in df.columns and 'price' in df.columns and 'description' in df.columns:
+            # Create a scatter plot with product names and prices, using description for hover info
+            fig = px.scatter(df, x='name', y='price', title='Product Prices with Descriptions',
+                           hover_data=['description'], size='price', color='price')
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_prices_bar'))
+            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_scatter'))
+    else:
+        # Default behavior (show multiple visualizations)
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if 'name' in df.columns and 'price' in df.columns:
+                fig = create_visualization(df, "bar", "name", "price", 
+                                         "Product Prices", "price")
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_prices_bar'))
+        
+        with col2:
+            if 'price' in df.columns:
+                fig = create_visualization(df, "histogram", "price", None, 
+                                         "Price Distribution")
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_price_hist'))
 
-    with col2:
-        if 'price' in df.columns:
-            # Price distribution
-            fig = px.histogram(df, x='price', nbins=10,
-                               title='Price Distribution',
-                               color_discrete_sequence=['#E74C3C'])
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_price_hist'))
-
-
-def create_careplan_visualizations(df):
-    """Create visualizations for care plan data"""
+def create_careplan_visualizations(df, chart_type=None):
+    """Create visualizations for care plan data with optional specific chart type"""
     if df.empty:
         return
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if 'name' in df.columns:
-            # Patient count
-            fig = px.bar(x=['Total Patients'], y=[len(df)],
-                         title='Total Care Plan Records',
-                         color=['Total Patients'],
-                         color_discrete_sequence=['#28B463'])
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_total_bar'))
-
-    with col2:
-        if 'case_notes' in df.columns:
-            # Case notes word count
+    
+    if chart_type:
+        if chart_type == "bar" and 'name' in df.columns:
+            # Count of patients
+            patient_count = len(df)
+            count_df = pd.DataFrame({'Category': ['Total Patients'], 'Count': [patient_count]})
+            fig = create_visualization(count_df, "bar", "Category", "Count", 
+                                     "Total Care Plan Records", "Count")
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_total_bar'))
+        
+        elif chart_type == "pie" and 'name' in df.columns:
+            # Simple pie chart showing distribution (just one slice for total)
+            count_df = pd.DataFrame({'Category': ['Patients'], 'Count': [len(df)]})
+            fig = create_visualization(count_df, "pie", "Category", "Count", 
+                                     "Care Plan Records")
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_pie'))
+        
+        elif chart_type == "histogram" and 'case_notes' in df.columns:
+            # Case notes word count distribution
             df['notes_word_count'] = df['case_notes'].astype(str).apply(lambda x: len(x.split()))
-            fig = px.histogram(df, x='notes_word_count', nbins=10,
-                               title='Case Notes Length Distribution',
-                               color_discrete_sequence=['#8E44AD'])
+            fig = create_visualization(df, "histogram", "notes_word_count", None, 
+                                     "Case Notes Length Distribution")
+            if fig:
+                st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_notes_hist'))
+        
+        elif chart_type == "scatter" and 'name' in df.columns and 'case_notes' in df.columns:
+            # Scatter plot with name and case notes length
+            df['notes_word_count'] = df['case_notes'].astype(str).apply(lambda x: len(x.split()))
+            fig = px.scatter(df, x='name', y='notes_word_count', title='Case Notes Length by Patient',
+                           hover_data=['case_notes'], size='notes_word_count', color='notes_word_count')
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_notes_hist'))
+            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_scatter'))
+    else:
+        # Default behavior
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if 'name' in df.columns:
+                patient_count = len(df)
+                count_df = pd.DataFrame({'Category': ['Total Patients'], 'Count': [patient_count]})
+                fig = create_visualization(count_df, "bar", "Category", "Count", 
+                                         "Total Care Plan Records", "Count")
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_total_bar'))
+        
+        with col2:
+            if 'case_notes' in df.columns:
+                df['notes_word_count'] = df['case_notes'].astype(str).apply(lambda x: len(x.split()))
+                fig = create_visualization(df, "histogram", "notes_word_count", None, 
+                                         "Case Notes Length Distribution")
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_notes_hist'))
 
 
 def get_image_base64(img_path):
