@@ -366,7 +366,15 @@ def get_product_details(product_id: int) -> dict:
     except Exception:
         return {"name": f"Unknown Product ({product_id})", "price": 0.0}
 
-
+def get_product_id_by_name(name: str) -> Optional[int]:
+    """Get product ID by name - FIXED CONNECTION"""
+    conn = get_pg_conn()  # This was using get_pg_products_conn() which doesn't exist
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM products WHERE name = %s", (name,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+    
 def validate_customer_exists(customer_id: int) -> bool:
     """Check if customer exists in MySQL database"""
     try:
@@ -381,9 +389,9 @@ def validate_customer_exists(customer_id: int) -> bool:
 
 
 def validate_product_exists(product_id: int) -> bool:
-    """Check if product exists in PostgreSQL products database"""
+    """Check if product exists in PostgreSQL products database - FIXED CONNECTION"""
     try:
-        pg_cnxn = get_pg_conn()
+        pg_cnxn = get_pg_conn()  # This was using get_pg_products_conn() which doesn't exist
         pg_cur = pg_cnxn.cursor()
         pg_cur.execute("SELECT COUNT(*) FROM products WHERE id = %s", (product_id,))
         result = pg_cur.fetchone()
@@ -494,40 +502,191 @@ def find_customer_by_name_enhanced(name: str) -> dict:
         return {"found": False, "error": f"Database error: {str(e)}"}
 
 def find_product_by_name(name: str) -> dict:
-    """Find product by name (supports partial matching)"""
+    """Find product by name (supports partial matching) - FIXED CONNECTION"""
     try:
-        pg_cnxn = get_pg_conn()
+        pg_cnxn = get_pg_conn()  # This was using get_pg_products_conn() which doesn't exist
         pg_cur = pg_cnxn.cursor()
 
         # Try exact match first
-        pg_cur.execute("SELECT id, name FROM products WHERE name = %s", (name,))
+        pg_cur.execute("SELECT id, name, price FROM products WHERE name = %s", (name,))
         result = pg_cur.fetchone()
 
         if result:
             pg_cnxn.close()
-            return {"id": result[0], "name": result[1], "found": True}
+            return {"id": result[0], "name": result[1], "price": float(result[2]), "found": True}
 
         # Try case-insensitive exact match
-        pg_cur.execute("SELECT id, name FROM products WHERE LOWER(name) = LOWER(%s)", (name,))
+        pg_cur.execute("SELECT id, name, price FROM products WHERE LOWER(name) = LOWER(%s)", (name,))
         result = pg_cur.fetchone()
 
         if result:
             pg_cnxn.close()
-            return {"id": result[0], "name": result[1], "found": True}
+            return {"id": result[0], "name": result[1], "price": float(result[2]), "found": True}
 
         # Try partial match
-        pg_cur.execute("SELECT id, name FROM products WHERE LOWER(name) LIKE LOWER(%s)", (f"%{name}%",))
+        pg_cur.execute("SELECT id, name, price FROM products WHERE LOWER(name) LIKE LOWER(%s)", (f"%{name}%",))
         result = pg_cur.fetchone()
 
         if result:
             pg_cnxn.close()
-            return {"id": result[0], "name": result[1], "found": True}
+            return {"id": result[0], "name": result[1], "price": float(result[2]), "found": True}
 
         pg_cnxn.close()
         return {"found": False, "error": f"Product '{name}' not found"}
 
     except Exception as e:
         return {"found": False, "error": f"Database error: {str(e)}"}
+
+
+def get_products_for_visualization() -> list:
+    """Get all products with details for visualization"""
+    try:
+        pg_cnxn = get_pg_conn()
+        pg_cur = pg_cnxn.cursor()
+        pg_cur.execute("SELECT id, name, price, description FROM products ORDER BY id")
+        products = pg_cur.fetchall()
+        pg_cnxn.close()
+        
+        return [
+            {
+                "id": p[0],
+                "name": p[1],
+                "price": float(p[2]),
+                "description": p[3] or "No description"
+            }
+            for p in products
+        ]
+    except Exception as e:
+        print(f"Error getting products for visualization: {e}")
+        return []
+
+# Add a new function to get sales data for visualization
+def get_sales_for_visualization() -> list:
+    """Get sales data with customer and product details for visualization"""
+    try:
+        mysql_cnxn = get_mysql_conn()
+        mysql_cur = mysql_cnxn.cursor()
+        
+        mysql_cur.execute("""
+            SELECT 
+                s.Id as sale_id,
+                c.Name as customer_name,
+                p.name as product_name,
+                s.quantity,
+                s.unit_price,
+                s.total_price,
+                s.sale_date
+            FROM Sales s
+            JOIN Customers c ON c.Id = s.customer_id
+            JOIN ProductsCache p ON p.id = s.product_id
+            ORDER BY s.sale_date DESC
+        """)
+        
+        sales = mysql_cur.fetchall()
+        mysql_cnxn.close()
+        
+        return [
+            {
+                "sale_id": s[0],
+                "customer_name": s[1],
+                "product_name": s[2],
+                "quantity": s[3],
+                "unit_price": float(s[4]),
+                "total_price": float(s[5]),
+                "sale_date": s[6].isoformat() if hasattr(s[6], 'isoformat') else str(s[6])
+            }
+            for s in sales
+        ]
+    except Exception as e:
+        print(f"Error getting sales for visualization: {e}")
+        return []
+
+# Add a new function to get customer data for visualization
+def get_customers_for_visualization() -> list:
+    """Get customer data for visualization"""
+    try:
+        mysql_cnxn = get_mysql_conn()
+        mysql_cur = mysql_cnxn.cursor()
+        
+        mysql_cur.execute("""
+            SELECT 
+                Id,
+                FirstName,
+                LastName,
+                Name,
+                Email,
+                CreatedAt
+            FROM Customers
+            ORDER BY Id
+        """)
+        
+        customers = mysql_cur.fetchall()
+        mysql_cnxn.close()
+        
+        return [
+            {
+                "id": c[0],
+                "first_name": c[1],
+                "last_name": c[2],
+                "name": c[3],
+                "email": c[4] or "No email",
+                "created_at": c[5].isoformat() if hasattr(c[5], 'isoformat') else str(c[5])
+            }
+            for c in customers
+        ]
+    except Exception as e:
+        print(f"Error getting customers for visualization: {e}")
+        return []
+
+# Add a new tool for visualization data
+@mcp.tool()
+async def get_visualization_data(
+        data_type: str,
+        chart_type: str = None,
+        filters: dict = None
+) -> Any:
+    """Get data optimized for specific visualization types"""
+    
+    if data_type == "products":
+        products = get_products_for_visualization()
+        return {
+            "data_type": "products",
+            "chart_type": chart_type or "bar",
+            "data": products,
+            "suggested_visualizations": [
+                {"type": "bar", "x": "name", "y": "price", "title": "Product Prices"},
+                {"type": "pie", "labels": "name", "values": "price", "title": "Product Price Distribution"},
+                {"type": "histogram", "x": "price", "title": "Price Distribution"}
+            ]
+        }
+    
+    elif data_type == "sales":
+        sales = get_sales_for_visualization()
+        return {
+            "data_type": "sales", 
+            "chart_type": chart_type or "bar",
+            "data": sales,
+            "suggested_visualizations": [
+                {"type": "bar", "x": "product_name", "y": "total_price", "title": "Sales by Product"},
+                {"type": "pie", "labels": "customer_name", "values": "total_price", "title": "Sales by Customer"},
+                {"type": "line", "x": "sale_date", "y": "total_price", "title": "Sales Over Time"}
+            ]
+        }
+    
+    elif data_type == "customers":
+        customers = get_customers_for_visualization()
+        return {
+            "data_type": "customers",
+            "chart_type": chart_type or "bar", 
+            "data": customers,
+            "suggested_visualizations": [
+                {"type": "bar", "x": "name", "y": "id", "title": "Customer Count"},
+                {"type": "pie", "labels": "first_name", "values": "id", "title": "Customer Distribution"}
+            ]
+        }
+    
+    else:
+        return {"error": f"Unknown data type: {data_type}. Use 'products', 'sales', or 'customers'."}
 
 # ——————————————————————————————————————
 # 7. NEW: Data Visualization Tool
@@ -1976,3 +2135,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 8000))
     mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+
