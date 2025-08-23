@@ -598,6 +598,8 @@ def generate_chart_insights(chart_config, viz_result):
     )
     
     user_prompt = f"""
+    CHECK IF THIS IS A DATA VISUALIZATION REQUEST! IF NOT, PLEASE STICK TO THE CRUD OPERATIONS. 
+    IMPORTANT!: EACH QUERY IS INDEPENDENT. PLEASE ANALYSE THE QUERY AND SEE IF IT IS A CRUD QUERY OR DATA VISUALIZATION QUERY
     Analyze this data visualization and provide 3-5 key insights:
     
     Chart Type: {chart_type}
@@ -1191,6 +1193,9 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         "RESPONSE FORMAT:\n"
         "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object, \"is_visualization\": boolean, \"chart_type\": string|null, \"x_field\": string|null, \"y_field\": string|null, \"aggregate\": string|null}\n\n"
 
+        THUMBRULE: ALWAYS ANALYSE THE QUERY - IS IT A QUERY FOR CRUD OPERATIONS OR A QUERY FOR DATA VISUALIZATION?
+
+        
         "CRITICAL DATA SOURCE ANALYSIS:\n"
         "When the query mentions 'sales by [SOMETHING]', analyze what [SOMETHING] is:\n"
         "- 'sales by product' or 'total sales by product' → Use sales_crud tool, x_field='product_name', y_field='total_price', aggregate='sum'\n"
@@ -1207,7 +1212,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         "- 'visualize': for creating charts, graphs, or dashboards\n\n"
 
         "VISUALIZATION DETECTION:\n"
-        "If query contains visualization keywords, set:\n"
+        "IF query contains visualization keywords, set:\n"
         "- \"is_visualization\": true\n"
         "- \"action\": \"visualize\"\n"
         "- \"chart_type\": one of [\"bar\", \"line\", \"pie\", \"scatter\", \"multi\"]\n\n"
@@ -2531,3 +2536,4 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
