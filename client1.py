@@ -15,6 +15,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import hashlib
+from datetime import datetime, date # Import datetime and date for date formatting
+from decimal import Decimal, InvalidOperation # Import Decimal for precise decimal handling
 
 load_dotenv()
 
@@ -24,10 +26,20 @@ if not GROQ_API_KEY:
     st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
     st.stop()
 
+# Initialize the MCP client
+# This client is designed to work with FastAPI servers
+# Running on a local host is fine for development
+MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000")
+client = Client(
+    base_url=f"{MCP_URL}/api",
+    transport=StreamableHttpTransport(),
+)
+
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
+    model_name=os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
 )
+
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(page_title="MCP CRUD Chat", layout="wide")
@@ -41,292 +53,513 @@ st.markdown("""
         min-width: 330px !important;
         padding: 0 0 0 0 !important;
     }
+    [data-testid="stSidebar"] .sidebar-title {
+        color: #fff !important;
+        font-weight: bold;
+        font-size: 2.2rem;
+        letter-spacing: -1px;
+        text-align: center;
+        margin-top: 28px;
+        margin-bottom: 18px;
+    }
     .sidebar-block {
         padding: 24px;
-        padding-top: 0;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
+        background-color: rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        margin: 12px;
     }
     .sidebar-block h3 {
+        margin-top: 0;
         color: #fff;
-        margin-bottom: 12px;
-        font-size: 1.2rem;
+    }
+    .sidebar-block p, .sidebar-block ul {
+        color: rgba(255, 255, 255, 0.8);
     }
     .sidebar-block ul {
-        list-style-type: none;
-        padding-left: 0;
+        padding-left: 20px;
     }
     .sidebar-block ul li {
         margin-bottom: 8px;
-        font-size: 0.9rem;
     }
-    .sidebar-block code {
-        background-color: rgba(255,255,255,0.2);
-        color: #fff;
-        padding: 2px 6px;
-        border-radius: 4px;
+    .stChatFloatingBottom {
+        padding-bottom: 2rem;
     }
-    .chat-container {
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
+    .st-emotion-cache-1c99sb8 {
+        gap: 0px;
     }
-    .chat-messages {
-        flex: 1;
-        overflow-y: auto;
-        padding-bottom: 80px;
+    .st-emotion-cache-1830500 {
+        padding: 0px 24px;
     }
-    .chat-input-box {
-        position: fixed;
-        bottom: 0;
-        width: 100%;
-        background: #f0f2f6;
-        padding: 10px 0;
-        z-index: 100;
-        max-width: 900px;
-        border-top: 1px solid #ddd;
+    .main-header {
+        text-align: center;
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #0d47a1;
+        margin-bottom: 1rem;
     }
-    .stTextInput>div>div>input {
+    .stChatMessage {
+        background-color: #f0f4f8;
+        padding: 1rem;
         border-radius: 12px;
+        margin-bottom: 1rem;
     }
-    .stButton>button {
-        width: 100%;
+    .stChatMessage.st-ai {
+        background-color: #e3f2fd;
     }
-    .message-container {
-        display: flex;
-        align-items: flex-start;
-        margin-bottom: 20px;
-    }
-    .message-avatar {
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
-        margin-right: 15px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.5rem;
-        background-color: #f0f2f6;
-    }
-    .user-avatar {
-        background-color: #007bff;
-        color: white;
-    }
-    .ai-avatar {
-        background-color: #4286f4;
-        color: white;
-    }
-    .message-content {
-        background-color: #f0f2f6;
-        padding: 15px;
-        border-radius: 12px;
-        border-top-left-radius: 0;
-        max-width: 70%;
+    .sql-block {
+        font-family: monospace;
+        background-color: #e0e0e0;
+        padding: 8px;
+        border-radius: 6px;
+        margin-top: 8px;
+        white-space: pre-wrap;
         word-wrap: break-word;
     }
-    .user-content {
-        background-color: #007bff;
-        color: white;
-        border-radius: 12px;
-        border-top-right-radius: 0;
-    }
-    .message-sql {
-        font-family: monospace;
-        background-color: #e9e9e9;
-        padding: 10px;
+    .markdown-container {
+        padding: 1rem;
+        background-color: #f0f4f8;
         border-radius: 8px;
-        margin-top: 10px;
-        overflow-x: auto;
-    }
-    .stDataFrame {
-        width: 100%;
-    }
-    .stSpinner > div > span {
-        font-size: 0.8rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     </style>
 """, unsafe_allow_html=True)
 
 
-# ————————————————
-# 1. MCP Client Setup
-# ————————————————
-# Initialize FastMCP client with streamable HTTP transport
-client = Client(
-    server_url=os.getenv("MCP_SERVER_URL", "http://localhost:8000"),
-    transport=StreamableHttpTransport,
-)
-
-
-# ————————————————
-# 2. Helper Functions
-# ————————————————
-def get_user_avatar():
-    """Returns a simple emoji avatar for the user."""
-    return "😃"
-
-def get_ai_avatar():
-    """Returns a simple emoji avatar for the assistant."""
-    return "🧠"
-
-
-def display_visual_analysis(analysis_data: dict):
+# ========== HELPERS & FORMATTERS ==========
+def convert_df_to_base64_image(df: pd.DataFrame):
     """
-    Renders the textual analysis and an interactive chart from the server response.
+    Converts a pandas DataFrame to a base64 encoded image (PNG).
     """
-    # 1. Display the textual analysis
-    st.markdown("---")
-    st.markdown("### 📊 Data Analysis & Insights")
-    st.markdown(analysis_data.get("analysis_text", "No analysis available."))
-    st.markdown("---")
+    html = df.to_html(index=False)
+    # Use a minimal HTML structure to render the table
+    html_content = f"""
+    <html>
+      <head>
+        <style>
+          body {{ font-family: sans-serif; }}
+          table {{ width: 100%; border-collapse: collapse; }}
+          th, td {{ padding: 8px; border: 1px solid #ddd; text-align: left; }}
+          th {{ background-color: #f2f2f2; }}
+        </style>
+      </head>
+      <body>
+        {html}
+      </body>
+    </html>
+    """
+    # Create an image from the HTML content (requires a library that can render HTML to image)
+    # This is a placeholder as direct HTML to image conversion in a simple Python script is complex.
+    # In a real-world app, you might use a service or a library like `html2image` or `imgkit`.
+    # For now, we'll just return a placeholder.
+    st.warning("Cannot convert table to image on this platform. Displaying as a DataFrame.")
+    return None
 
-    # 2. Display the chart
-    st.markdown("### 📈 Interactive Dashboard")
-    try:
-        df = pd.DataFrame(analysis_data.get("data", []))
-        chart_spec = analysis_data.get("chart_spec", {})
-        chart_type = chart_spec.get("chart_type")
-        x_axis = chart_spec.get("x_axis")
-        y_axis = chart_spec.get("y_axis")
+def format_natural(data: Any, display_option: str) -> Any:
+    """
+    Formats the raw data into a human-readable format based on display option.
+    - list: converts to a human-readable list string.
+    - dict: converts to a human-readable dict string.
+    - Other types: returns as is.
+    """
+    if display_option == "Natural language":
+        # Convert lists of dicts to a more readable markdown format
+        if isinstance(data, list) and all(isinstance(item, dict) for item in data):
+            # We can create a simple markdown table
+            if not data:
+                return "No results found."
+            
+            # Get all unique keys for the header
+            all_keys = set()
+            for item in data:
+                all_keys.update(item.keys())
+            headers = list(all_keys)
 
-        if df.empty or not x_axis or not y_axis:
-            st.warning("⚠️ Not enough data to create a chart based on the analysis.")
-            return
+            # Build the markdown table string
+            markdown_table = " | ".join(headers) + "\n"
+            markdown_table += "|---|---|---|\n" # Separator line
+            
+            for item in data:
+                row = [str(item.get(key, '')) for key in headers]
+                markdown_table += " | ".join(row) + "\n"
+            
+            return markdown_table
 
-        fig = None
-        if chart_type == "bar":
-            fig = px.bar(df, x=x_axis, y=y_axis, title=f"Bar Chart of {y_axis.title()} by {x_axis.title()}")
-        elif chart_type == "line":
-            fig = px.line(df, x=x_axis, y=y_axis, title=f"Line Chart of {y_axis.title()} over {x_axis.title()}")
-        elif chart_type == "scatter":
-            fig = px.scatter(df, x=x_axis, y=y_axis, title=f"Scatter Plot of {x_axis.title()} vs {y_axis.title()}")
-        elif chart_type == "pie":
-            fig = px.pie(df, names=x_axis, values=y_axis, title=f"Pie Chart of {y_axis.title()}")
+        # For single dicts, format nicely
+        elif isinstance(data, dict):
+            return "\n".join([f"**{k}**: {v}" for k, v in data.items()])
+
+        # For simple strings/numbers, just return
         else:
-            st.warning(f"❌ Unsupported chart type from LLM: {chart_type}")
-            return
+            return data
+    else:
+        return data
 
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
+
+def format_sql_crud(raw: Dict) -> Dict:
+    """
+    Formats the raw dictionary response from the CRUD tool.
+    """
+    reply_content = {}
+    
+    # 1. Format the SQL query if it exists
+    sql = raw.get("sql")
+    if sql:
+        reply_content["sql"] = f"```sql\n{sql}\n```"
+    
+    # 2. Format the result based on its type
+    result = raw.get("result")
+    if isinstance(result, list):
+        if all(isinstance(item, dict) for item in result):
+            # Case 1: List of dictionaries (e.g., SELECT query result)
+            reply_content["result"] = pd.DataFrame(result)
+        else:
+            # Case 2: Simple list (e.g., status message)
+            reply_content["result"] = f"Result: {result}"
+    elif isinstance(result, dict):
+        # Case 3: Single dictionary (e.g., describe table, INSERT/UPDATE result)
+        reply_content["result"] = pd.DataFrame([result])
+    else:
+        # Case 4: Scalar value or string
+        reply_content["result"] = str(result)
+        
+    return reply_content
+
+
+# ========== MCP TOOL CALLING UTILITIES ==========
+async def call_mcp_tool(tool_name: str, **kwargs: Any) -> Any:
+    """
+    Asynchronously calls a tool on the MCP server and handles streaming.
+    """
+    try:
+        raw_response = ""
+        async for chunk in client.stream_tool(tool_name, **kwargs):
+            if chunk.type == "text":
+                raw_response += chunk.content
+            # Handle other chunk types if needed (e.g., JSON, binary)
+            
+        # Parse the final string
+        try:
+            # Attempt to load as JSON, which is the standard response format
+            response_data = json.loads(raw_response)
+        except json.JSONDecodeError:
+            # If it's not JSON, assume it's a simple string response
+            response_data = {"result": raw_response}
+        
+        return response_data
 
     except Exception as e:
-        st.error(f"❌ Failed to generate the interactive dashboard: {e}")
+        return {"result": f"❌ Error calling tool '{tool_name}': {e}"}
 
-# ————————————————
-# 3. Main Streamlit App
-# ————————————————
-# Initialize chat history in session state
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "assistant",
-            "content": "Hello! I am a chat assistant for managing data in your databases. How can I help you today?",
-            "format": "text",
-        }
+
+async def process_user_query(prompt: str):
+    """
+    Processes the user's query by deciding which tool to call.
+    """
+    # Create the Groq tool-use message with all available tool definitions
+    messages = [
+        SystemMessage(
+            content=f"""
+                You are a highly efficient and accurate AI assistant. Your primary function is to act as an intermediary between the user and a set of backend tools.
+
+                User queries are related to customer data, sales data, and product data. You have access to three databases:
+                - `mysql`: Contains 'Customers' and 'CarePlan' tables.
+                - `postgres_products`: Contains the 'products' table.
+                - `postgres_sales`: Contains the 'sales' table.
+
+                You have three primary tools at your disposal:
+                1.  `sql_crud_tool`: This tool is used for all CRUD (Create, Read, Update, Delete) operations on the MySQL and PostgreSQL databases.
+                2.  `analyze_and_visualize_tool`: This tool is used to generate data visualizations and analysis based on user queries.
+                3.  `health_check_tool`: This tool can be used to check the status of the backend database connections.
+
+                When a user asks for data manipulation (create, read, update, delete) or a general data query (e.g., "list all customers", "delete customer Alice", "update Bob's email"), you **must** use the `sql_crud_tool`.
+
+                When a user asks for a chart, graph, visualization, or data analysis (e.g., "show a bar chart of sales by customer", "analyze sales trends", "create a dashboard"), you **must** use the `analyze_and_visualize_tool`.
+
+                When a user asks about the status or health of the database, use the `health_check_tool`.
+
+                If the user asks for something not covered by these tools, respond naturally and inform them that you can't perform that action.
+
+                Your response should be based solely on the output of the tool you call. Do not invent information or generate responses that are not supported by the tool's output.
+                """
+        ),
+        HumanMessage(content=prompt),
     ]
 
-# Sidebar for controls and info
-with st.sidebar:
-    st.markdown("<h2 class='sidebar-title'>CRUD Chat</h2>", unsafe_allow_html=True)
-
-    st.markdown("""
-        <div class="sidebar-block">
-            <h3>🎯 Supported Queries</h3>
-            <ul>
-                <li><code>list products</code></li>
-                <li><code>show all careplans</code></li>
-                <li><code>create product...</code></li>
-                <li><code>update careplan...</code></li>
-                <li><code>delete product...</code></li>
-                <li><code>describe products table</code></li>
-            </ul>
-        </div>
-        <div class="sidebar-block">
-            <h3>📊 Advanced Visualizations</h3>
-            <p>Try queries like:</p>
-            <ul>
-                <li><code>Analyze the products data.</code></li>
-                <li><code>Show me insights from the careplan table.</code></li>
-                <li><code>Create a dashboard for products.</code></li>
-            </ul>
-        </div>
-    """, unsafe_allow_html=True)
-
-# Main chat UI
-st.title("MCP Database Chat")
-
-# Display chat messages
-for message in st.session_state.messages:
-    with st.chat_message(
-        message["role"], avatar=get_ai_avatar() if message["role"] == "assistant" else get_user_avatar()
-    ):
-        if message["format"] == "sql_crud":
-            content = message["content"]
-            st.markdown(f"**Result:** {content['result']}")
-            if content.get("sql"):
-                st.code(content["sql"], language="sql")
-        elif message["format"] == "visual_analysis":
-            display_visual_analysis(message["content"])
-        else:
-            # Fallback for simple text messages
-            st.markdown(message["content"])
-
-
-# User input
-if prompt := st.chat_input("What would you like to do?"):
-    st.session_state.messages.append({"role": "user", "content": prompt, "format": "text"})
-    
-    # Display user message
-    with st.chat_message("user", avatar=get_user_avatar()):
-        st.markdown(prompt)
-
-    with st.spinner("Thinking..."):
-        try:
-            # Simple keyword-based routing for analysis vs. standard ETL
-            if any(k in prompt.lower() for k in ["analyze", "analysis", "insights", "dashboard"]):
-                # Determine which database to analyze
-                if "products" in prompt.lower():
-                    database_to_analyze = "products"
-                elif "careplan" in prompt.lower():
-                    database_to_analyze = "careplan"
-                else:
-                    database_to_analyze = None # Let the LLM decide or fall back
-
-                if database_to_analyze:
-                    response = await client.run_tool("analyze_and_visualize_tool", database=database_to_analyze, user_query=prompt)
-                    if response.get("status") == "success":
-                        assistant_message = {
-                            "role": "assistant",
-                            "content": response,
-                            "format": "visual_analysis",
-                        }
-                    else:
-                        assistant_message = {
-                            "role": "assistant",
-                            "content": response.get("message", "An unexpected error occurred."),
-                            "format": "text",
-                        }
-                else:
-                    assistant_message = {
-                        "role": "assistant",
-                        "content": "Please specify which database you'd like to analyze (e.g., 'Analyze the **products** data').",
-                        "format": "text",
+    tool_config = {
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "sql_crud_tool",
+                    "description": "Performs all CRUD operations on the databases (MySQL and PostgreSQL). This is the primary tool for all data retrieval, creation, modification, and deletion.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "operation": {
+                                "type": "string",
+                                "description": "The type of database operation to perform.",
+                                "enum": ["select", "insert", "update", "delete", "describe", "list_tables"]
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "The target database for the operation. Must be one of 'mysql', 'postgres_products', 'postgres_sales'.",
+                                "enum": ["mysql", "postgres_products", "postgres_sales"]
+                            },
+                            "table_name": {
+                                "type": "string",
+                                "description": "The name of the table to operate on (e.g., 'Customers', 'Sales', 'Products')."
+                            },
+                            "columns": {
+                                "type": "string",
+                                "description": "A comma-separated list of columns to retrieve. Use '*' for all columns.",
+                                "default": "*"
+                            },
+                            "where_clause": {
+                                "type": "string",
+                                "description": "A SQL-style WHERE clause to filter the results. Example: 'customer_id = 123 AND order_date > '2023-01-01''"
+                            },
+                            "data": {
+                                "type": "object",
+                                "description": "A dictionary of column-value pairs for INSERT or UPDATE operations. Example: {'name': 'John Doe', 'email': 'john.doe@example.com'}"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "The maximum number of rows to return for SELECT operations."
+                            }
+                        },
+                        "required": ["operation", "database", "table_name"]
                     }
-            else:
-                # Fallback to standard ETL tool for CRUD operations
-                response = await client.run_tool("etl_tool", user_query=prompt)
-                
-                assistant_message = {
-                    "role": "assistant",
-                    "content": response,
-                    "format": "sql_crud",
-                    "sql": response.get("sql"),
                 }
-        except Exception as e:
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "analyze_and_visualize_tool",
+                    "description": "Analyzes data and generates a visualization (e.g., chart, graph) or a detailed report. Use this tool only when the user explicitly asks for a chart, graph, visualization, or dashboard.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "user_query": {
+                                "type": "string",
+                                "description": "The original user's query about the visualization or analysis."
+                            },
+                            "database": {
+                                "type": "string",
+                                "description": "The database to analyze. Must be one of 'mysql', 'postgres_products', 'postgres_sales'.",
+                                "enum": ["mysql", "postgres_products", "postgres_sales"]
+                            }
+                        },
+                        "required": ["user_query", "database"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "health_check_tool",
+                    "description": "Checks the health and connectivity of the backend databases.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            },
+        ]
+    }
+
+    try:
+        chat_completion = groq_client.with_options(tool_choice="auto").invoke(messages, tools=tool_config["tools"])
+        response_message = chat_completion.content[0]
+        
+        # Check if the LLM decided to call a tool
+        if "tool_calls" in response_message:
+            tool_call = response_message["tool_calls"][0]
+            tool_name = tool_call["function"]["name"]
+            tool_args = json.loads(tool_call["function"]["arguments"])
+            
+            # Add the tool call message to the chat
+            tool_call_message = {
+                "role": "tool_call",
+                "content": {
+                    "name": tool_name,
+                    "args": tool_args
+                }
+            }
+            st.session_state.messages.append(tool_call_message)
+
+            # Call the appropriate tool based on the LLM's decision
+            if tool_name == "sql_crud_tool":
+                raw = await call_mcp_tool(tool_name, **tool_args)
+                reply_content, fmt = format_sql_crud(raw), "sql_crud"
+            elif tool_name == "analyze_and_visualize_tool":
+                raw = await call_mcp_tool(tool_name, **tool_args)
+                reply_content = raw
+                fmt = "visualization"
+            elif tool_name == "health_check_tool":
+                raw = await call_mcp_tool(tool_name, **tool_args)
+                reply_content = raw
+                fmt = "text"
+            else:
+                reply_content = {"result": f"❌ Unknown tool: {tool_name}"}
+                fmt = "text"
+
             assistant_message = {
                 "role": "assistant",
-                "content": f"⚠️ An unexpected error occurred: {e}",
-                "format": "text",
+                "content": reply_content,
+                "format": fmt,
+                "request": tool_call,
+                "tool": tool_name,
+                "action": "run_tool",
+                "args": tool_args,
+                "user_query": prompt,
             }
+            st.session_state.messages.append(assistant_message)
+        else:
+            # Handle cases where the LLM does not call a tool
+            reply_content = {"result": chat_completion.content}
+            fmt = "text"
+            assistant_message = {
+                "role": "assistant",
+                "content": reply_content,
+                "format": fmt,
+                "request": {"tool_calls": []},
+                "tool": None,
+                "action": "text_response",
+                "args": None,
+                "user_query": prompt,
+            }
+            st.session_state.messages.append(assistant_message)
+
+    except Exception as e:
+        error_message = f"❌ An error occurred: {e}"
+        st.error(error_message)
+        st.session_state.messages.append({"role": "error", "content": {"result": error_message}})
+
+
+# ========== STREAMLIT APP LAYOUT & LOGIC ==========
+def display_message(message):
+    """
+    Displays a single chat message based on its role and format.
+    """
+    with st.chat_message(message["role"]):
+        if message["format"] == "sql_crud":
+            # Display SQL if available
+            if "sql" in message["content"]:
+                st.markdown("### SQL Query:")
+                st.code(message["content"]["sql"], language="sql")
+
+            # Display the result
+            st.markdown("### Result:")
+            result = message["content"]["result"]
+            if isinstance(result, pd.DataFrame):
+                # Clean up the DataFrame for display
+                # Format floats to two decimal places
+                for col in result.columns:
+                    if pd.api.types.is_numeric_dtype(result[col]):
+                        result[col] = result[col].apply(lambda x: f'{x:.2f}' if isinstance(x, (float, Decimal)) else x)
+                st.dataframe(result, hide_index=True)
+            elif isinstance(result, dict):
+                st.json(result)
+            else:
+                st.write(result)
         
-        st.session_state.messages.append(assistant_message)
-        st.experimental_rerun()
+        elif message["format"] == "visualization":
+            # Convert raw response string to a dictionary
+            try:
+                raw_dict = ast.literal_eval(message["content"])
+                fig_json = raw_dict.get("plotly_json")
+                if fig_json:
+                    fig = go.Figure(json.loads(fig_json))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.json(message["content"])
+
+            except (ValueError, SyntaxError) as e:
+                st.warning(f"Failed to parse visualization data: {e}. Displaying raw content.")
+                st.write(message["content"])
+        
+        else: # "text" format or tool calls
+            if message["role"] == "tool_call":
+                st.markdown(f"**Tool Call:** `{message['content']['name']}`")
+                st.json(message["content"]["args"])
+            elif message["role"] == "assistant":
+                if isinstance(message["content"]["result"], str):
+                    st.markdown(message["content"]["result"])
+                else:
+                    st.json(message["content"]["result"])
+            else: # "user" or "error"
+                if isinstance(message["content"], str):
+                    st.markdown(message["content"])
+                else:
+                    st.json(message["content"])
+
+
+def main():
+    """Main application logic"""
+
+    st.title("MCP CRUD Chat 💬")
+    st.markdown("Talk to your databases using natural language!")
+
+    # Display the available tools in the sidebar
+    with st.sidebar:
+        st.header("🎯 My Capabilities")
+        st.markdown(
+            """
+            I can help you with:
+            - **Listing** and **querying** data
+            - **Adding**, **updating**, or **deleting** records
+            - **Analyzing** and **visualizing** data
+            - **Checking** database health
+
+            ---
+
+            ### 📚 Data Sources
+            - **MySQL:** `Customers` and `CarePlan` tables
+            - **PostgreSQL:** `products` and `sales` tables
+
+            ---
+
+            ### 📝 Example Queries
+            - **`list all customers`**
+            - **`show sales in march`**
+            - **`add a new customer named 'Jane Doe' with email 'jane.doe@example.com'`**
+            - **`update 'Jane Doe's email to 'jane.d@example.com'`**
+            - **`delete the sales record for product ID 'p123'`**
+            - **`what's the schema for the products table?`**
+            - **`show me a bar chart of sales by product name`**
+            - **`check database health`**
+            """
+        )
+
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+        
+    # Display chat messages from history on app rerun
+    for message in st.session_state.messages:
+        display_message(message)
+
+    # Accept user input
+    if prompt := st.chat_input("What do you need help with?"):
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Display user message in chat message container
+        display_message({"role": "user", "content": prompt})
+        
+        # Process the query asynchronously
+        asyncio.run(process_user_query(prompt))
+
+    # Auto-scroll to the bottom of the page
+    components.html("""
+        <script>
+            setTimeout(() => {
+                const main = document.querySelector('.main');
+                main.scrollTop = main.scrollHeight;
+            }, 100);
+        </script>
+    """)
+
+
+if __name__ == "__main__":
+    main()
+
