@@ -293,6 +293,27 @@ def generate_tool_descriptions(tools_dict: dict) -> str:
         descriptions.append(f"{i}. {tool_name}: {tool_desc}")
 
     return "\n".join(descriptions)
+    
+def call_mcp_tool(tool: str, action: str, args: dict) -> any:
+    # Special handling for visualization tools that don't need parameters
+    if tool in ["visualize_sales", "visualize_products"]:
+        return asyncio.run(_invoke_visualization_tool(tool))
+    else:
+        return asyncio.run(_invoke_tool(tool, action, args))
+
+async def _invoke_visualization_tool(tool: str) -> any:
+    """Special invocation for visualization tools that don't take parameters"""
+    transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}/mcp")
+    async with Client(transport) as client:
+        # Call the tool without any payload
+        res_obj = await client.call_tool(tool, {})
+    if res_obj.structured_content is not None:
+        return res_obj.structured_content
+    text = "".join(b.text for b in res_obj.content).strip()
+    try:
+        return json.loads(text)
+    except:
+        return text
 
 def get_image_base64(img_path):
     img = Image.open(img_path)
@@ -606,7 +627,17 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
     """Enhanced parse user query with better DELETE operation handling"""
-
+    visualization_phrases = [
+        "visualize sales", "show sales chart", "sales bar chart", "sales visualization",
+        "visualize products", "show product chart", "product pie chart", "product distribution"
+    ]
+    
+    if any(phrase in query.lower() for phrase in visualization_phrases):
+        if "sales" in query.lower():
+            return {"tool": "visualize_sales", "action": "", "args": {}}
+        elif "product" in query.lower():
+            return {"tool": "visualize_products", "action": "", "args": {}}
+            
     if not available_tools:
         return {"error": "No tools available"}
 
@@ -716,15 +747,16 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - 'case notes', 'notes' → 'CaseNotes'\n"
     
     "8. **VISUALIZATION TOOLS** → Use 'visualize_sales' or 'visualize_products':\n"
-        "   - 'show bar chart of sales', 'visualize sales data', 'sales bar chart'\n"
-        "   - 'show pie chart of products', 'visualize product distribution', 'product pie chart'\n"
-        "   - Any query asking for charts, graphs, or visual representations of sales or product data\n\n"
-        
-        "**VISUALIZATION EXAMPLES:**\n"
-        "- 'show me a bar chart of sales' → {\"tool\": \"visualize_sales\", \"action\": \"read\", \"args\": {}}\n"
-        "- 'create a pie chart of products' → {\"tool\": \"visualize_products\", \"action\": \"read\", \"args\": {}}\n"
-        "- 'visualize sales data' → {\"tool\": \"visualize_sales\", \"action\": \"read\", \"args\": {}}\n"
-        "- 'show product distribution' → {\"tool\": \"visualize_products\", \"action\": \"read\", \"args\": {}}\n"
+    "   - 'visualize sales', 'show sales chart', 'sales bar chart', 'sales visualization'\n"
+    "   - 'visualize products', 'show product chart', 'product pie chart', 'product distribution'\n"
+    "   - Any query asking for charts, graphs, or visual representations of sales or product data\n"
+    "   - IMPORTANT: These tools don't need any parameters, so always use empty args: {}\n\n"
+    
+    "**VISUALIZATION EXAMPLES:**\n"
+    "- 'show me a bar chart of sales' → {\"tool\": \"visualize_sales\", \"action\": \"\", \"args\": {}}\n"
+    "- 'create a pie chart of products' → {\"tool\": \"visualize_products\", \"action\": \"\", \"args\": {}}\n"
+    "- 'visualize sales data' → {\"tool\": \"visualize_sales\", \"action\": \"\", \"args\": {}}\n"
+    "- 'show product distribution' → {\"tool\": \"visualize_products\", \"action\": \"\", \"args\": {}}\n"
 )
 
     user_prompt = f"""User query: "{query}"
@@ -1206,8 +1238,8 @@ if application == "MCP Application":
 
         elif msg.get("format") == "image":
             image_data = msg["content"]
-            if isinstance(image_data,dict) and "image" in image_data:
-                display_base64_image(image_data["image"])
+            if isinstance(msg["content"], dict) and "image" in msg["content"]:
+                display_base64_image(msg["content"]["image"])
             else:
                 st.error("Failed to display visualisation")
             
@@ -1579,5 +1611,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
