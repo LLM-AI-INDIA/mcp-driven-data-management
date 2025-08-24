@@ -1823,7 +1823,7 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
 # ========== SIDEBAR NAVIGATION ==========
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>Solutions Scope</div>", unsafe_allow_html=True)
-    with st.():
+    with st.container():
         # Application selectbox (with key)
         application = st.selectbox(
             "Select Application",
@@ -2600,6 +2600,7 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
 
 
 
