@@ -11,17 +11,6 @@ from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
 import re
 from dotenv import load_dotenv
-import plotly.express as px
-import plotly.graph_objects as go
-# Global counter for unique visualization keys
-_viz_counter = 0
-
-def get_unique_viz_key(prefix: str) -> str:
-    """Generate unique keys for Streamlit plotly charts"""
-    global _viz_counter
-    _viz_counter += 1
-    return f"{prefix}_{_viz_counter}"
-
 
 load_dotenv()
 
@@ -33,7 +22,7 @@ if not GROQ_API_KEY:
 
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "deepseek-r1-distill-llama-70b")
+    model_name=os.environ.get("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
 )
 
 # ========== PAGE CONFIG ==========
@@ -305,136 +294,6 @@ def generate_tool_descriptions(tools_dict: dict) -> str:
 
     return "\n".join(descriptions)
 
-
-# ========== VISUALIZATION FUNCTIONS ==========
-def create_sales_visualizations(df):
-    """Create visualizations for sales data"""
-    if df.empty:
-        return
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if 'product_name' in df.columns and 'total_price' in df.columns:
-            # Sales by Product
-            product_sales = df.groupby('product_name')['total_price'].sum().reset_index()
-            fig = px.bar(product_sales, x='product_name', y='total_price',
-                         title='Total Sales by Product',
-                         color='total_price',
-                         color_continuous_scale='viridis')
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('sales_product_bar'))
-
-    with col2:
-        if 'customer_name' in df.columns and 'total_price' in df.columns:
-            # Sales by Customer
-            customer_sales = df.groupby('customer_name')['total_price'].sum().reset_index()
-            fig = px.pie(customer_sales, values='total_price', names='customer_name',
-                         title='Sales Distribution by Customer')
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('sales_customer_pie'))
-
-    # Time series if date available
-    if 'sale_date' in df.columns and 'total_price' in df.columns:
-        try:
-            df['sale_date'] = pd.to_datetime(df['sale_date'])
-            daily_sales = df.groupby(df['sale_date'].dt.date)['total_price'].sum().reset_index()
-            fig = px.line(daily_sales, x='sale_date', y='total_price',
-                          title='Sales Over Time',
-                          markers=True)
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('sales_timeline'))
-        except:
-            pass
-
-
-def create_customer_visualizations(df):
-    """Create visualizations for customer data"""
-    if df.empty:
-        return
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if 'FirstName' in df.columns:
-            # Customer count by first name
-            name_counts = df['FirstName'].value_counts().reset_index()
-            name_counts.columns = ['FirstName', 'Count']
-            fig = px.bar(name_counts, x='FirstName', y='Count',
-                         title='Customer Count by First Name',
-                         color='Count',
-                         color_continuous_scale='blues')
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('customer_names_bar'))
-
-    with col2:
-        if 'Email' in df.columns:
-            # Email availability
-            email_status = df['Email'].notna().value_counts().reset_index()
-            email_status.columns = ['Has_Email', 'Count']
-            email_status['Has_Email'] = email_status['Has_Email'].map({True: 'Has Email', False: 'No Email'})
-            fig = px.pie(email_status, values='Count', names='Has_Email',
-                         title='Email Availability',
-                         color_discrete_map={'Has Email': '#2E86C1', 'No Email': '#F39C12'})
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('customer_email_pie'))
-
-
-def create_product_visualizations(df):
-    """Create visualizations for product data"""
-    if df.empty:
-        return
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if 'name' in df.columns and 'price' in df.columns:
-            # Product prices
-            fig = px.bar(df, x='name', y='price',
-                         title='Product Prices',
-                         color='price',
-                         color_continuous_scale='plasma')
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_prices_bar'))
-
-    with col2:
-        if 'price' in df.columns:
-            # Price distribution
-            fig = px.histogram(df, x='price', nbins=10,
-                               title='Price Distribution',
-                               color_discrete_sequence=['#E74C3C'])
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('product_price_hist'))
-
-
-def create_careplan_visualizations(df):
-    """Create visualizations for care plan data"""
-    if df.empty:
-        return
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if 'name' in df.columns:
-            # Patient count
-            fig = px.bar(x=['Total Patients'], y=[len(df)],
-                         title='Total Care Plan Records',
-                         color=['Total Patients'],
-                         color_discrete_sequence=['#28B463'])
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_total_bar'))
-
-    with col2:
-        if 'case_notes' in df.columns:
-            # Case notes word count
-            df['notes_word_count'] = df['case_notes'].astype(str).apply(lambda x: len(x.split()))
-            fig = px.histogram(df, x='notes_word_count', nbins=10,
-                               title='Case Notes Length Distribution',
-                               color_discrete_sequence=['#8E44AD'])
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True, key=get_unique_viz_key('careplan_notes_hist'))
-
-
 def get_image_base64(img_path):
     img = Image.open(img_path)
     buffered = BytesIO()
@@ -442,6 +301,7 @@ def get_image_base64(img_path):
     img_bytes = buffered.getvalue()
     img_base64 = base64.b64encode(img_bytes).decode()
     return img_base64
+
 
 # ========== SIDEBAR NAVIGATION ==========
 with st.sidebar:
@@ -544,7 +404,7 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            Data Exchange with Natural Language 
+            MCP-Driven Data Management With Natural Language
         </span>
         <span style="
             font-size: 1.15rem;
@@ -599,6 +459,23 @@ def _clean_json(raw: str) -> str:
     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
     return json_match.group(0).strip() if json_match else raw.strip()
 
+def display_base64_image(base64_string):
+    """Display base64 encoded image in Streamlit"""
+    try:
+        # Extract the base64 data from the string
+        if base64_string.startswith("data:image/png;base64,"):
+            base64_string = base64_string.split(",")[1]
+        
+        # Decode the base64 string
+        image_data = base64.b64decode(base64_string)
+        image = Image.open(BytesIO(image_data))
+        
+        # Display the image
+        st.image(image, use_column_width=True)
+        return True
+    except Exception as e:
+        st.error(f"Failed to display image: {str(e)}")
+        return False
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
 def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
@@ -614,7 +491,7 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
             'columns',  # Column selection
             'where_clause',  # WHERE conditions
             'filter_conditions',  # Structured filters
-            'limit','visualise'  # Row limit
+            'limit'  # Row limit
         }
 
         # Clean args to only include allowed parameters
@@ -661,14 +538,14 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
     elif tool_name == "sqlserver_crud":
         allowed_params = {
             'operation', 'name', 'email', 'limit', 'customer_id',
-            'new_email', 'table_name','visualise'
+            'new_email', 'table_name'
         }
         return {k: v for k, v in args.items() if k in allowed_params}
 
     elif tool_name == "postgresql_crud":
         allowed_params = {
             'operation', 'name', 'price', 'description', 'limit',
-            'product_id', 'new_price', 'table_name','visualise'
+            'product_id', 'new_price', 'table_name'
         }
         return {k: v for k, v in args.items() if k in allowed_params}
 
@@ -741,147 +618,114 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     tools_description = "\n".join(tool_info)
 
     system_prompt = (
-        "You are an intelligent database router for CRUD operations. "
-        "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
+    "You are an intelligent database router for CRUD operations. "
+    "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
 
-        "RESPONSE FORMAT:\n"
-        "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
+    "RESPONSE FORMAT:\n"
+    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
 
-        "ACTION MAPPING:\n"
-        "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-        "- 'create': for adding, inserting, or creating NEW records\n"
-        "- 'update': for modifying, changing, or updating existing records\n"
-        "- 'delete': for removing, deleting, or destroying records\n"
-        "- 'describe': for showing table structure, schema, or column information\n\n"
+    "ACTION MAPPING:\n"
+    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
+    "- 'create': for adding, inserting, or creating NEW records\n"
+    "- 'update': for modifying, changing, or updating existing records\n"
+    "- 'delete': for removing, deleting, or destroying records\n"
+    "- 'describe': for showing table structure, schema, or column information\n\n"
 
-        "CRITICAL TOOL SELECTION RULES (HIGHEST PRIORITY):\n"
-        "\n"
-        "1. **SALES/TRANSACTION QUERIES** → ALWAYS use 'sales_crud':\n"
-        "   - 'list sales', 'show sales', 'display sales', 'get sales'\n"
-        "   - 'list all sales', 'show all sales', 'sales data'\n"
-        "   - 'sales with visualisations', 'sales with visualizations'\n"
-        "   - 'sales report', 'revenue data', 'purchase history'\n"
-        "   - 'who bought what', 'customer purchases', 'transaction data'\n"
-        "   - Cross-database queries combining customer + product + sales info\n"
-        "   - 'create sale', 'add sale', 'new transaction'\n"
-        "   - Any query containing the word 'sales' should ALWAYS use sales_crud\n"
-        "   - Transactions, purchases, orders, revenue queries\n"
-        "\n"
-        "2. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
-        "   - 'list products', 'show products', 'display products'\n"
-        "   - 'product inventory', 'product catalog', 'product information'\n"
-        "   - 'add product', 'create product', 'new product'\n"
-        "   - 'update product', 'change product price', 'modify product'\n"
-        "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
-        "   - Any query primarily about products, pricing, or inventory (but NOT sales)\n"
-        "\n"
-        "3. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
-        "   - 'list customers', 'show customers', 'display customers'\n"
-        "   - 'customer information', 'customer details'\n"
-        "   - 'add customer', 'create customer', 'new customer'\n"
-        "   - 'update customer', 'change customer email', 'modify customer'\n"
-        "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
-        "   - Any query primarily about customers, names, or emails (but NOT sales)\n"
-        "\n"
-        "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
-        "   - 'show care plans', 'list case notes', 'display care plans', 'care plan records'\n"
-        "   - 'list care plans with name John', 'care plans mentioning cancer'\n"
-        "   - 'show care plan without address', 'display only name and notes'\n"
-        "   - Any query related to healthcare records with Name, Address, Phone Number, Case Notes\n"
-        "\n"
+    "CRITICAL TOOL SELECTION RULES:\n"
+    "\n"
+    "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
+    "   - 'list products', 'show products', 'display products'\n"
+    "   - 'product inventory', 'product catalog', 'product information'\n"
+    "   - 'add product', 'create product', 'new product'\n"
+    "   - 'update product', 'change product price', 'modify product'\n"
+    "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
+    "   - Any query primarily about products, pricing, or inventory\n"
+    "\n"
+    "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
+    "   - 'list customers', 'show customers', 'display customers'\n"
+    "   - 'customer information', 'customer details'\n"
+    "   - 'add customer', 'create customer', 'new customer'\n"
+    "   - 'update customer', 'change customer email', 'modify customer'\n"
+    "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
+    "   - Any query primarily about customers, names, or emails\n"
+    "\n"
+    "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
+    "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
+    "   - 'sales report', 'revenue data', 'purchase history'\n"
+    "   - 'who bought what', 'customer purchases'\n"
+    "   - Cross-database queries combining customer + product + sales info\n"
+    "   - 'create sale', 'add sale', 'new transaction'\n"
+    "   - Any query asking for combined data from multiple tables\n"
+    "\n"
+    "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
+    "   - 'show care plans', 'list case notes', 'display care plans', 'care plan records'\n"
+    "   - 'list care plans with name John', 'care plans mentioning cancer'\n"
+    "   - 'show care plan without address', 'display only name and notes'\n"
+    "   - Any query related to healthcare records with Name, Address, Phone Number, Case Notes\n\n"
 
-        "VISUALIZATION DETECTION (NEW FEATURE):\n"
-        "\n"
-        "For any query containing 'with visualisations' or 'with visualizations':\n"
-        "- Add {\"visualise\": True} to the args\n"
-        "- This applies to any tool (sales_crud, sqlserver_crud, postgresql_crud, careplan_crud)\n"
-        "- Works with any action (primarily 'read' operations)\n"
-        "\n"
-        "EXAMPLES OF VISUALIZATION DETECTION:\n"
-        "\n"
-        "Query: 'list all sales with visualisations'\n"
-        "→ {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"visualise\": True}}\n"
-        "\n"
-        "Query: 'show customers with visualizations'\n"
-        "→ {\"tool\": \"sqlserver_crud\", \"action\": \"read\", \"args\": {\"visualise\": True}}\n"
-        "\n"
-        "Query: 'display products with visualisations'\n"
-        "→ {\"tool\": \"postgresql_crud\", \"action\": \"read\", \"args\": {\"visualise\": True}}\n"
-        "\n"
-        "Query: 'show care plans with visualizations'\n"
-        "→ {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"visualise\": True}}\n"
-        "\n"
+    "**ETL & DISPLAY FORMATTING RULES:**\n"
+    "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
+    "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
 
-        "**ETL & DISPLAY FORMATTING RULES:**\n"
-        "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
-        "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
+    "1. **DECIMAL FORMATTING:**\n"
+    "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
+    "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
+    "   - **Example Query:** 'show sales with 2 decimal places'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
 
-        "1. **DECIMAL FORMATTING:**\n"
-        "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
-        "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
-        "   - **Example Query:** 'show sales with 2 decimal places'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
+    "2. **DATE FORMATTING:**\n"
+    "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
+    "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
+    "   - **Example Query:** 'show sales with formatted dates'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
 
-        "2. **DATE FORMATTING:**\n"
-        "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
-        "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
-        "   - **Example Query:** 'show sales with formatted dates'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
+    "3. **NULL VALUE HANDLING:**\n"
+    "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
+    "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
+    "   - **Example Query:** 'show sales but remove records with missing info'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
 
-        "3. **NULL VALUE HANDLING:**\n"
-        "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
-        "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
-        "   - **Example Query:** 'show sales but remove records with missing info'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
+    "4. **STRING CONCATENATION:**\n"
+    "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
+    "   - Use: {\"display_format\": \"String Concatenation\"}\n"
+    "   - **Example Query:** 'show sales with customer full names'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
 
-        "4. **STRING CONCATENATION:**\n"
-        "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
-        "   - Use: {\"display_format\": \"String Concatenation\"}\n"
-        "   - **Example Query:** 'show sales with customer full names'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
+    "5. **CARE PLAN COLUMN FILTERING:**\n"
+    "   - If the user asks to 'show only name and notes', 'remove address', or 'exclude phone number'.\n"
+    "   - Use: `columns` field in args with positive or negative column names.\n"
+    "   - **Example Query:** 'show only name and case notes from care plans'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name,case_notes\"}}\n"
+    "   - **Example Query:** 'show care plans without phone number and address'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"*,-phone_number,-address\"}}\n"
 
-        "5. **CARE PLAN COLUMN FILTERING:**\n"
-        "   - If the user asks to 'show only name and notes', 'remove address', or 'exclude phone number'.\n"
-        "   - For EXCLUSION queries (exclude, remove, without, but not):\n"
-        "   - **Example Query:** 'show care plans without phone number and address'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude phone_number,address\"}}\n"
-        "   - **Example Query:** 'list care plans but exclude phone number and address'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude phone_number,address\"}}\n"
-        "   - **Example Query:** 'show care plans without address'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"exclude address\"}}\n"
-        "   - For POSITIVE selection:\n"
-        "   - **Example Query:** 'show only name and case notes from care plans'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name,case_notes\"}}\n"
+    "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
+    "   - If user asks 'care plans mentioning cancer in notes', use LIKE\n"
+    "   - Use: {\"where_clause\": \"case_notes LIKE '%cancer%'\"}\n"
+    "   - **Example Query:** 'list care plans mentioning cancer'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"case_notes LIKE '%cancer%'\"}}\n"
+    "   - **Example Query:** 'care plans where name is John'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name = 'John'\"}}\n"
+    "   - **Example Query:** 'show care plans for address New York'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"address LIKE '%New York%'\"}}\n"
 
-        "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
-        "   - For name-based searches, use the 'name' parameter directly\n"
-        "   - **Example Query:** 'show records in care plan where name is John'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"name\": \"John\"}}\n"
-        "   - **Example Query:** 'care plans for Emily'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"name\": \"Emily\"}}\n"
-        "   - For case notes searches, use where_clause with LIKE\n"
-        "   - **Example Query:** 'care plans mentioning cancer'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"case_notes LIKE '%cancer%'\"}}\n"
-        "   - **Example Query:** 'show care plans for address New York'\n"
-        "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"address LIKE '%New York%'\"}}\n"
-
-        "7. **CARE PLAN COLUMN NAME MAPPING:**\n"
-        "   - 'name' → 'Name'\n"
-        "   - 'address' → 'Address'\n"
-        "   - 'phone number', 'phone' → 'PhoneNumber'\n"
-        "   - 'case notes', 'notes' → 'CaseNotes'\n"
-
-        f"AVAILABLE TOOLS:\n{tools_description}\n\n"
-
-        "CRITICAL ROUTING DECISION TREE:\n"
-        "1. Does the query contain 'sales', 'transaction', 'purchase', 'revenue', 'bought', 'order'? → sales_crud\n"
-        "2. Does the query contain 'product', 'inventory', 'item' (without sales context)? → postgresql_crud\n"
-        "3. Does the query contain 'customer', 'client' (without sales context)? → sqlserver_crud\n"
-        "4. Does the query contain 'care plan', 'patient', 'case notes'? → careplan_crud\n"
-        "5. If ambiguous, prefer sales_crud for combined queries involving multiple entities\n"
-        "\n"
-        "REMEMBER: The word 'sales' ALWAYS routes to sales_crud, regardless of other context.\n"
-    )
+    "7. **CARE PLAN COLUMN NAME MAPPING:**\n"
+    "   - 'name' → 'Name'\n"
+    "   - 'address' → 'Address'\n"
+    "   - 'phone number', 'phone' → 'PhoneNumber'\n"
+    "   - 'case notes', 'notes' → 'CaseNotes'\n"
+    
+    "8. **VISUALIZATION TOOLS** → Use 'visualize_sales' or 'visualize_products':\n"
+        "   - 'show bar chart of sales', 'visualize sales data', 'sales bar chart'\n"
+        "   - 'show pie chart of products', 'visualize product distribution', 'product pie chart'\n"
+        "   - Any query asking for charts, graphs, or visual representations of sales or product data\n\n"
+        
+        "**VISUALIZATION EXAMPLES:**\n"
+        "- 'show me a bar chart of sales' → {\"tool\": \"visualize_sales\", \"action\": \"read\", \"args\": {}}\n"
+        "- 'create a pie chart of products' → {\"tool\": \"visualize_products\", \"action\": \"read\", \"args\": {}}\n"
+        "- 'visualize sales data' → {\"tool\": \"visualize_sales\", \"action\": \"read\", \"args\": {}}\n"
+        "- 'show product distribution' → {\"tool\": \"visualize_products\", \"action\": \"read\", \"args\": {}}\n"
+)
 
     user_prompt = f"""User query: "{query}"
 
@@ -1027,15 +871,10 @@ Respond with the exact JSON format with properly extracted parameters."""
         # Enhanced parameter extraction for read operations with columns and where_clause
         elif result.get("action") == "read" and result.get("tool") == "sales_crud":
             args = result.get("args", {})
-            import re
-            if "visualise" not in args:
-                if re.search(r'with visualisations|with visualizations', query, re.IGNORECASE):
-                    args["visualise"] = True
-                    print(f"DEBUG: Extracted visualisation flag from query '{query}'")
-
-            result["args"] = args
+            
+            # Extract columns if not already extracted
             if "columns" not in args:
-
+                import re
                 
                 # Look for column specification patterns
                 column_patterns = [
@@ -1364,6 +1203,14 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
+
+        elif msg.get("format") == "image":
+            image_data = msg["content"]
+            if isinstance(image_data,dict) and "image" in image_data:
+                display_base64_image(image_data["image"])
+            else:
+                st.error("Failed to display visualisation")
+            
         elif msg.get("format") == "multi_step_read" and isinstance(msg["content"], dict):
             step = msg["content"]
             st.markdown(
@@ -1448,19 +1295,6 @@ if application == "MCP Application":
                 df = pd.DataFrame(content["result"])
                 st.table(df)
                 # Check if this is ETL formatted data by looking for specific formatting
-                request_args = msg.get("args", {})
-                if request_args.get('visualise', False):
-                    st.markdown("### 📊 Visualisations")
-
-                    # Create visualizations based on tool type
-                    if tool == "sales_crud":
-                        create_sales_visualizations(df)
-                    elif tool == "sqlserver_crud":
-                        create_customer_visualizations(df)
-                    elif tool == "postgresql_crud":
-                        create_product_visualizations(df)
-                    elif tool == "careplan_crud":
-                        create_careplan_visualizations(df)
                 if tool == "sales_crud" and len(df.columns) > 0:
                     # Check for different ETL formats based on column names
                     if "sale_summary" in df.columns:
@@ -1745,4 +1579,5 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
