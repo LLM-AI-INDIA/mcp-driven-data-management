@@ -2264,7 +2264,7 @@ if application == "MCP Application":
 
         # --- LEFT: Hamburger (Tools) ---
         with chatbar_cols[0]:
-            hamburger_clicked = st.form_submit_button("≡", use__width=True)
+            hamburger_clicked = st.form_submit_button("≡", use_container_width=True)
 
         # --- MIDDLE: Input Box ---
         with chatbar_cols[1]:
@@ -2277,7 +2277,7 @@ if application == "MCP Application":
 
         # --- RIGHT: Send Button ---
         with chatbar_cols[2]:
-            send_clicked = st.form_submit_button("➤", use__width=True)
+            send_clicked = st.form_submit_button("➤", use_container_width=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
     # ========== FLOATING TOOL MENU ==========
@@ -2600,9 +2600,4 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
-
-
-
-
-
 
