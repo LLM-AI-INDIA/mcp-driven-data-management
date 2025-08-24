@@ -2182,8 +2182,8 @@ if application == "MCP Application":
                                     "tool": tool,
                                     "chart_type": "pie",
                                     "button_key": pie_key
-                                 }
-                                 st.rerun()
+                                }
+                                st.rerun()
                 
                 # Check if this is ETL formatted data by looking for specific formatting
                 if tool == "sales_crud" and len(df.columns) > 0:
@@ -2600,6 +2600,7 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
 
 
 
