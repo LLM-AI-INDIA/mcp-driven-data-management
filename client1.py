@@ -7,39 +7,12 @@ from PIL import Image
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from fastmcp import Client
-from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
-import re
+from datetime import datetime, date
+from decimal import Decimal, InvalidOperation
 from dotenv import load_dotenv
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import hashlib
-from datetime import datetime, date # Import datetime and date for date formatting
-from decimal import Decimal, InvalidOperation # Import Decimal for precise decimal handling
 
 load_dotenv()
-
-# Initialize Groq client with environment variable
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
-    st.stop()
-
-# Initialize the MCP client
-# This client is designed to work with FastAPI servers
-# Running on a local host is fine for development
-MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000")
-client = Client(
-    base_url=f"{MCP_URL}/api",
-    transport=StreamableHttpTransport(),
-)
-
-groq_client = ChatGroq(
-    groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
-)
-
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(page_title="MCP CRUD Chat", layout="wide")
@@ -131,7 +104,6 @@ def convert_df_to_base64_image(df: pd.DataFrame):
     Converts a pandas DataFrame to a base64 encoded image (PNG).
     """
     html = df.to_html(index=False)
-    # Use a minimal HTML structure to render the table
     html_content = f"""
     <html>
       <head>
@@ -147,14 +119,12 @@ def convert_df_to_base64_image(df: pd.DataFrame):
       </body>
     </html>
     """
-    # Create an image from the HTML content (requires a library that can render HTML to image)
     # This is a placeholder as direct HTML to image conversion in a simple Python script is complex.
     # In a real-world app, you might use a service or a library like `html2image` or `imgkit`.
-    # For now, we'll just return a placeholder.
     st.warning("Cannot convert table to image on this platform. Displaying as a DataFrame.")
     return None
 
-def format_natural(data: Any, display_option: str) -> Any:
+def format_natural(data: any, display_option: str) -> any:
     """
     Formats the raw data into a human-readable format based on display option.
     - list: converts to a human-readable list string.
@@ -162,71 +132,55 @@ def format_natural(data: Any, display_option: str) -> Any:
     - Other types: returns as is.
     """
     if display_option == "Natural language":
-        # Convert lists of dicts to a more readable markdown format
         if isinstance(data, list) and all(isinstance(item, dict) for item in data):
-            # We can create a simple markdown table
             if not data:
                 return "No results found."
             
-            # Get all unique keys for the header
             all_keys = set()
             for item in data:
                 all_keys.update(item.keys())
             headers = list(all_keys)
-
-            # Build the markdown table string
             markdown_table = " | ".join(headers) + "\n"
-            markdown_table += "|---|---|---|\n" # Separator line
+            markdown_table += "|---|---|---|\n"
             
             for item in data:
                 row = [str(item.get(key, '')) for key in headers]
                 markdown_table += " | ".join(row) + "\n"
             
             return markdown_table
-
-        # For single dicts, format nicely
         elif isinstance(data, dict):
             return "\n".join([f"**{k}**: {v}" for k, v in data.items()])
-
-        # For simple strings/numbers, just return
         else:
             return data
     else:
         return data
 
-
-def format_sql_crud(raw: Dict) -> Dict:
+def format_sql_crud(raw: dict) -> dict:
     """
     Formats the raw dictionary response from the CRUD tool.
     """
     reply_content = {}
     
-    # 1. Format the SQL query if it exists
     sql = raw.get("sql")
     if sql:
         reply_content["sql"] = f"```sql\n{sql}\n```"
     
-    # 2. Format the result based on its type
     result = raw.get("result")
     if isinstance(result, list):
         if all(isinstance(item, dict) for item in result):
-            # Case 1: List of dictionaries (e.g., SELECT query result)
             reply_content["result"] = pd.DataFrame(result)
         else:
-            # Case 2: Simple list (e.g., status message)
             reply_content["result"] = f"Result: {result}"
     elif isinstance(result, dict):
-        # Case 3: Single dictionary (e.g., describe table, INSERT/UPDATE result)
         reply_content["result"] = pd.DataFrame([result])
     else:
-        # Case 4: Scalar value or string
         reply_content["result"] = str(result)
         
     return reply_content
 
 
 # ========== MCP TOOL CALLING UTILITIES ==========
-async def call_mcp_tool(tool_name: str, **kwargs: Any) -> Any:
+async def call_mcp_tool(tool_name: str, **kwargs: any) -> any:
     """
     Asynchronously calls a tool on the MCP server and handles streaming.
     """
@@ -235,14 +189,10 @@ async def call_mcp_tool(tool_name: str, **kwargs: Any) -> Any:
         async for chunk in client.stream_tool(tool_name, **kwargs):
             if chunk.type == "text":
                 raw_response += chunk.content
-            # Handle other chunk types if needed (e.g., JSON, binary)
             
-        # Parse the final string
         try:
-            # Attempt to load as JSON, which is the standard response format
             response_data = json.loads(raw_response)
         except json.JSONDecodeError:
-            # If it's not JSON, assume it's a simple string response
             response_data = {"result": raw_response}
         
         return response_data
@@ -255,32 +205,27 @@ async def process_user_query(prompt: str):
     """
     Processes the user's query by deciding which tool to call.
     """
-    # Create the Groq tool-use message with all available tool definitions
+    # Initialize Groq client with environment variable
+    GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+    if not GROQ_API_KEY:
+        st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
+        return
+
+    groq_client = ChatGroq(
+        groq_api_key=GROQ_API_KEY,
+        model_name=os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
+    )
+    
     messages = [
         SystemMessage(
-            content=f"""
-                You are a highly efficient and accurate AI assistant. Your primary function is to act as an intermediary between the user and a set of backend tools.
-
-                User queries are related to customer data, sales data, and product data. You have access to three databases:
-                - `mysql`: Contains 'Customers' and 'CarePlan' tables.
-                - `postgres_products`: Contains the 'products' table.
-                - `postgres_sales`: Contains the 'sales' table.
-
-                You have three primary tools at your disposal:
-                1.  `sql_crud_tool`: This tool is used for all CRUD (Create, Read, Update, Delete) operations on the MySQL and PostgreSQL databases.
-                2.  `analyze_and_visualize_tool`: This tool is used to generate data visualizations and analysis based on user queries.
-                3.  `health_check_tool`: This tool can be used to check the status of the backend database connections.
-
-                When a user asks for data manipulation (create, read, update, delete) or a general data query (e.g., "list all customers", "delete customer Alice", "update Bob's email"), you **must** use the `sql_crud_tool`.
-
-                When a user asks for a chart, graph, visualization, or data analysis (e.g., "show a bar chart of sales by customer", "analyze sales trends", "create a dashboard"), you **must** use the `analyze_and_visualize_tool`.
-
-                When a user asks about the status or health of the database, use the `health_check_tool`.
-
-                If the user asks for something not covered by these tools, respond naturally and inform them that you can't perform that action.
-
-                Your response should be based solely on the output of the tool you call. Do not invent information or generate responses that are not supported by the tool's output.
-                """
+            content="""
+                You are an AI assistant for database management. You can perform CRUD operations,
+                generate visualizations, and check database health.
+                Your tools are `sql_crud_tool`, `analyze_and_visualize_tool`, and `health_check_tool`.
+                Use `sql_crud_tool` for all data manipulation.
+                Use `analyze_and_visualize_tool` for all charts and reports.
+                Use `health_check_tool` for status checks.
+            """
         ),
         HumanMessage(content=prompt),
     ]
@@ -291,41 +236,17 @@ async def process_user_query(prompt: str):
                 "type": "function",
                 "function": {
                     "name": "sql_crud_tool",
-                    "description": "Performs all CRUD operations on the databases (MySQL and PostgreSQL). This is the primary tool for all data retrieval, creation, modification, and deletion.",
+                    "description": "Performs all CRUD operations on the databases (MySQL and PostgreSQL).",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "operation": {
-                                "type": "string",
-                                "description": "The type of database operation to perform.",
-                                "enum": ["select", "insert", "update", "delete", "describe", "list_tables"]
-                            },
-                            "database": {
-                                "type": "string",
-                                "description": "The target database for the operation. Must be one of 'mysql', 'postgres_products', 'postgres_sales'.",
-                                "enum": ["mysql", "postgres_products", "postgres_sales"]
-                            },
-                            "table_name": {
-                                "type": "string",
-                                "description": "The name of the table to operate on (e.g., 'Customers', 'Sales', 'Products')."
-                            },
-                            "columns": {
-                                "type": "string",
-                                "description": "A comma-separated list of columns to retrieve. Use '*' for all columns.",
-                                "default": "*"
-                            },
-                            "where_clause": {
-                                "type": "string",
-                                "description": "A SQL-style WHERE clause to filter the results. Example: 'customer_id = 123 AND order_date > '2023-01-01''"
-                            },
-                            "data": {
-                                "type": "object",
-                                "description": "A dictionary of column-value pairs for INSERT or UPDATE operations. Example: {'name': 'John Doe', 'email': 'john.doe@example.com'}"
-                            },
-                            "limit": {
-                                "type": "integer",
-                                "description": "The maximum number of rows to return for SELECT operations."
-                            }
+                            "operation": {"type": "string", "enum": ["select", "insert", "update", "delete", "describe", "list_tables"]},
+                            "database": {"type": "string", "enum": ["mysql", "postgres_products", "postgres_sales"]},
+                            "table_name": {"type": "string"},
+                            "columns": {"type": "string"},
+                            "where_clause": {"type": "string"},
+                            "data": {"type": "object"},
+                            "limit": {"type": "integer"}
                         },
                         "required": ["operation", "database", "table_name"]
                     }
@@ -335,19 +256,12 @@ async def process_user_query(prompt: str):
                 "type": "function",
                 "function": {
                     "name": "analyze_and_visualize_tool",
-                    "description": "Analyzes data and generates a visualization (e.g., chart, graph) or a detailed report. Use this tool only when the user explicitly asks for a chart, graph, visualization, or dashboard.",
+                    "description": "Generates data visualizations or detailed reports based on user queries.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "user_query": {
-                                "type": "string",
-                                "description": "The original user's query about the visualization or analysis."
-                            },
-                            "database": {
-                                "type": "string",
-                                "description": "The database to analyze. Must be one of 'mysql', 'postgres_products', 'postgres_sales'.",
-                                "enum": ["mysql", "postgres_products", "postgres_sales"]
-                            }
+                            "user_query": {"type": "string"},
+                            "database": {"type": "string", "enum": ["mysql", "postgres_products", "postgres_sales"]}
                         },
                         "required": ["user_query", "database"]
                     }
@@ -358,10 +272,7 @@ async def process_user_query(prompt: str):
                 "function": {
                     "name": "health_check_tool",
                     "description": "Checks the health and connectivity of the backend databases.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {}
-                    }
+                    "parameters": {"type": "object", "properties": {}}
                 }
             },
         ]
@@ -371,23 +282,17 @@ async def process_user_query(prompt: str):
         chat_completion = groq_client.with_options(tool_choice="auto").invoke(messages, tools=tool_config["tools"])
         response_message = chat_completion.content[0]
         
-        # Check if the LLM decided to call a tool
         if "tool_calls" in response_message:
             tool_call = response_message["tool_calls"][0]
             tool_name = tool_call["function"]["name"]
             tool_args = json.loads(tool_call["function"]["arguments"])
             
-            # Add the tool call message to the chat
             tool_call_message = {
                 "role": "tool_call",
-                "content": {
-                    "name": tool_name,
-                    "args": tool_args
-                }
+                "content": {"name": tool_name, "args": tool_args}
             }
             st.session_state.messages.append(tool_call_message)
 
-            # Call the appropriate tool based on the LLM's decision
             if tool_name == "sql_crud_tool":
                 raw = await call_mcp_tool(tool_name, **tool_args)
                 reply_content, fmt = format_sql_crud(raw), "sql_crud"
@@ -415,7 +320,6 @@ async def process_user_query(prompt: str):
             }
             st.session_state.messages.append(assistant_message)
         else:
-            # Handle cases where the LLM does not call a tool
             reply_content = {"result": chat_completion.content}
             fmt = "text"
             assistant_message = {
@@ -438,22 +342,15 @@ async def process_user_query(prompt: str):
 
 # ========== STREAMLIT APP LAYOUT & LOGIC ==========
 def display_message(message):
-    """
-    Displays a single chat message based on its role and format.
-    """
+    """Displays a single chat message based on its role and format."""
     with st.chat_message(message["role"]):
         if message["format"] == "sql_crud":
-            # Display SQL if available
             if "sql" in message["content"]:
                 st.markdown("### SQL Query:")
                 st.code(message["content"]["sql"], language="sql")
-
-            # Display the result
             st.markdown("### Result:")
             result = message["content"]["result"]
             if isinstance(result, pd.DataFrame):
-                # Clean up the DataFrame for display
-                # Format floats to two decimal places
                 for col in result.columns:
                     if pd.api.types.is_numeric_dtype(result[col]):
                         result[col] = result[col].apply(lambda x: f'{x:.2f}' if isinstance(x, (float, Decimal)) else x)
@@ -462,9 +359,7 @@ def display_message(message):
                 st.json(result)
             else:
                 st.write(result)
-        
         elif message["format"] == "visualization":
-            # Convert raw response string to a dictionary
             try:
                 raw_dict = ast.literal_eval(message["content"])
                 fig_json = raw_dict.get("plotly_json")
@@ -473,12 +368,10 @@ def display_message(message):
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.json(message["content"])
-
             except (ValueError, SyntaxError) as e:
                 st.warning(f"Failed to parse visualization data: {e}. Displaying raw content.")
                 st.write(message["content"])
-        
-        else: # "text" format or tool calls
+        else:
             if message["role"] == "tool_call":
                 st.markdown(f"**Tool Call:** `{message['content']['name']}`")
                 st.json(message["content"]["args"])
@@ -487,7 +380,7 @@ def display_message(message):
                     st.markdown(message["content"]["result"])
                 else:
                     st.json(message["content"]["result"])
-            else: # "user" or "error"
+            else:
                 if isinstance(message["content"], str):
                     st.markdown(message["content"])
                 else:
@@ -531,6 +424,16 @@ def main():
             """
         )
 
+    # Corrected client instantiation: We no longer need to explicitly
+    # pass StreamableHttpTransport. The Client handles it internally.
+    try:
+        MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000")
+        client = Client(base_url=f"{MCP_URL}/api")
+    except Exception as e:
+        st.error(f"❌ Failed to connect to MCP Server: {e}")
+        st.stop()
+
+
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -553,13 +456,11 @@ def main():
     components.html("""
         <script>
             setTimeout(() => {
-                const main = document.querySelector('.main');
-                main.scrollTop = main.scrollHeight;
-            }, 100);
+                window.scrollTo(0, document.body.scrollHeight);
+            }, 80);
         </script>
     """)
 
 
 if __name__ == "__main__":
     main()
-
