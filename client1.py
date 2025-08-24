@@ -1406,37 +1406,25 @@ if application == "MCP Application":
 
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
+    with st.form("chatbar_form", clear_on_submit=True):
+        chatbar_cols = st.columns([1, 16, 1])  # Left: hamburger, Middle: input, Right: send
 
-    # Create a callback function for form submission
-    def handle_chat_submit():
-        if st.session_state.chat_input_box:
-            st.session_state.process_query = True
-            st.session_state.pending_query = st.session_state.chat_input_box
-            # Clear the input after submission
-            st.session_state.chat_input_box = ""
-
-    # Use a form with on_submit callback
-    with st.form("chat_form", clear_on_submit=True):
-        chat_cols = st.columns([1, 16, 1])
-    
         # --- LEFT: Hamburger (Tools) ---
-        with chat_cols[0]:
+        with chatbar_cols[0]:
             hamburger_clicked = st.form_submit_button("≡", use_container_width=True)
-    
-        # --- MIDDLE: Input Box ---
-        with chat_cols[1]:
-            user_query_input = st.text_input(
-                "Chat Input",
-                placeholder="How can I help you today? (Press Enter to send)",
-                label_visibility="collapsed",
-                key="chat_input_box",
-                on_change=handle_chat_submit
-            )
-    
-        # --- RIGHT: Send Button ---
-        with chat_cols[2]:
-            send_clicked = st.form_submit_button("➤", use_container_width=True)
 
+        # --- MIDDLE: Input Box ---
+        with chatbar_cols[1]:
+            user_query_input = st.text_input(
+                "Chat Input",  # Provide a label
+                placeholder="How can I help you today?",
+                label_visibility="collapsed",  # Hide the label visually
+                key="chat_input_box"
+            )
+
+        # --- RIGHT: Send Button ---
+        with chatbar_cols[2]:
+            send_clicked = st.form_submit_button("➤", use_container_width=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
     # ========== FLOATING TOOL MENU ==========
@@ -1461,9 +1449,8 @@ if application == "MCP Application":
         st.rerun()
 
     # ========== PROCESS CHAT INPUT ==========
-    if user_query_input and (send_clicked or user_query_input):
+    if user_query_input and send_clicked:
         user_query = user_query_input
-        st.session_state["chat_input_box"] = ""
         user_steps = []
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
@@ -1676,5 +1663,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
