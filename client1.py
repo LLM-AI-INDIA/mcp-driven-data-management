@@ -15,9 +15,16 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import hashlib
+import time
 
 load_dotenv()
 
+def hash_text(text):
+    """Create a hash for unique component keys"""
+    # Add a timestamp to ensure uniqueness
+    unique_text = f"{text}_{time.time()}"
+    return hashlib.md5(unique_text.encode()).hexdigest()[:8]
+    
 # Initialize Groq client with environment variable
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 if not GROQ_API_KEY:
@@ -662,7 +669,7 @@ def render_visualization_section(viz_result, user_query):
     
     if fig:
         # Display the chart
-        st.plotly_chart(fig, use_container_width=True, key=f"chart_{hash_text(user_query)}")
+        st.plotly_chart(fig, use_container_width=True, key=f"chart_{hash_text(user_query + str(time.time()))}")
         
         # Chart insights section
         with st.expander("📈 Chart Insights & Details", expanded=False):
@@ -1816,7 +1823,7 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
 # ========== SIDEBAR NAVIGATION ==========
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>Solutions Scope</div>", unsafe_allow_html=True)
-    with st.container():
+    with st.():
         # Application selectbox (with key)
         application = st.selectbox(
             "Select Application",
@@ -2133,8 +2140,11 @@ if application == "MCP Application":
                     with st.expander("📊 Quick Visualization Options"):
                         col1, col2, col3 = st.columns(3)
                         
+                        unique_suffix = f"{hash_text(str(content))}_{int(time.time() * 1000) % 10000}"
+
+                        
                         with col1:
-                            if st.button("📊 Bar Chart", key=f"bar_{hash_text(str(content))}"):
+                            if st.button("📊 Bar Chart", key=f"bar_{unique_suffix}"):
                                 # Create quick bar chart
                                 quick_viz_query = f"create a bar chart from this {tool.replace('_crud', '')} data"
                                 st.session_state.quick_viz_request = {
@@ -2144,9 +2154,9 @@ if application == "MCP Application":
                                     "chart_type": "bar"
                                 }
                                 st.rerun()
-                        
+
                         with col2:
-                            if st.button("📈 Line Chart", key=f"line_{hash_text(str(content))}"):
+                            if st.button("📈 Line Chart", key=f"line_{unique_suffix}"):
                                 quick_viz_query = f"create a line chart from this {tool.replace('_crud', '')} data"
                                 st.session_state.quick_viz_request = {
                                     "query": quick_viz_query,
@@ -2155,17 +2165,17 @@ if application == "MCP Application":
                                     "chart_type": "line"
                                 }
                                 st.rerun()
-                        
+
                         with col3:
-                            if st.button("🥧 Pie Chart", key=f"pie_{hash_text(str(content))}"):
+                            if st.button("🥧 Pie Chart", key=f"pie_{unique_suffix}"):
                                 quick_viz_query = f"create a pie chart from this {tool.replace('_crud', '')} data"
                                 st.session_state.quick_viz_request = {
                                     "query": quick_viz_query,
                                     "data": content["result"],
                                     "tool": tool,
                                     "chart_type": "pie"
-                                }
-                                st.rerun()
+                                 }
+                                 st.rerun()
                 
                 # Check if this is ETL formatted data by looking for specific formatting
                 if tool == "sales_crud" and len(df.columns) > 0:
@@ -2246,7 +2256,7 @@ if application == "MCP Application":
 
         # --- LEFT: Hamburger (Tools) ---
         with chatbar_cols[0]:
-            hamburger_clicked = st.form_submit_button("≡", use_container_width=True)
+            hamburger_clicked = st.form_submit_button("≡", use__width=True)
 
         # --- MIDDLE: Input Box ---
         with chatbar_cols[1]:
@@ -2259,7 +2269,7 @@ if application == "MCP Application":
 
         # --- RIGHT: Send Button ---
         with chatbar_cols[2]:
-            send_clicked = st.form_submit_button("➤", use_container_width=True)
+            send_clicked = st.form_submit_button("➤", use__width=True)
     st.markdown('</div></div>', unsafe_allow_html=True)
 
     # ========== FLOATING TOOL MENU ==========
@@ -2582,3 +2592,4 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
