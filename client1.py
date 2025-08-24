@@ -4,15 +4,29 @@ import streamlit as st
 import base64
 from io import BytesIO
 from PIL import Image
-from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage
+from groq import Groq
 from fastmcp import Client
+from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
 from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
 from dotenv import load_dotenv
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import hashlib
 
 load_dotenv()
+
+# Initialize Groq client with environment variable
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
+    st.stop()
+
+groq_client = Groq(
+    api_key=GROQ_API_KEY,
+)
 
 # ========== PAGE CONFIG ==========
 st.set_page_config(page_title="MCP CRUD Chat", layout="wide")
@@ -103,64 +117,43 @@ def convert_df_to_base64_image(df: pd.DataFrame):
     """
     Converts a pandas DataFrame to a base64 encoded image (PNG).
     """
-    html = df.to_html(index=False)
-    html_content = f"""
-    <html>
-      <head>
-        <style>
-          body {{ font-family: sans-serif; }}
-          table {{ width: 100%; border-collapse: collapse; }}
-          th, td {{ padding: 8px; border: 1px solid #ddd; text-align: left; }}
-          th {{ background-color: #f2f2f2; }}
-        </style>
-      </head>
-      <body>
-        {html}
-      </body>
-    </html>
-    """
     # This is a placeholder as direct HTML to image conversion in a simple Python script is complex.
     # In a real-world app, you might use a service or a library like `html2image` or `imgkit`.
     st.warning("Cannot convert table to image on this platform. Displaying as a DataFrame.")
     return None
 
-def format_natural(data: any, display_option: str) -> any:
+def format_natural(raw: dict, selected_display_option: str) -> any:
     """
-    Formats the raw data into a human-readable format based on display option.
-    - list: converts to a human-readable list string.
-    - dict: converts to a human-readable dict string.
-    - Other types: returns as is.
+    Formats the raw dictionary response from the MCP server into a human-readable format.
     """
-    if display_option == "Natural language":
-        if isinstance(data, list) and all(isinstance(item, dict) for item in data):
-            if not data:
-                return "No results found."
-            
-            all_keys = set()
-            for item in data:
-                all_keys.update(item.keys())
-            headers = list(all_keys)
-            markdown_table = " | ".join(headers) + "\n"
-            markdown_table += "|---|---|---|\n"
-            
-            for item in data:
-                row = [str(item.get(key, '')) for key in headers]
-                markdown_table += " | ".join(row) + "\n"
-            
-            return markdown_table
-        elif isinstance(data, dict):
-            return "\n".join([f"**{k}**: {v}" for k, v in data.items()])
+    if selected_display_option == "Natural language":
+        if "result" in raw:
+            result = raw["result"]
+            if isinstance(result, list):
+                if not result:
+                    return "No results found."
+                
+                # Check if the list contains dictionaries
+                if all(isinstance(item, dict) for item in result):
+                    df = pd.DataFrame(result)
+                    return df.to_markdown(index=False)
+                else:
+                    return f"Result: {result}"
+            elif isinstance(result, dict):
+                # Simple markdown for a single dictionary
+                return "\n".join([f"**{k}**: {v}" for k, v in result.items()])
+            else:
+                return str(result)
         else:
-            return data
+            return raw
     else:
-        return data
+        return raw
 
 def format_sql_crud(raw: dict) -> dict:
     """
-    Formats the raw dictionary response from the CRUD tool.
+    Formats the raw dictionary response from the CRUD tool for structured display.
     """
     reply_content = {}
-    
     sql = raw.get("sql")
     if sql:
         reply_content["sql"] = f"```sql\n{sql}\n```"
@@ -205,87 +198,73 @@ async def process_user_query(prompt: str):
     """
     Processes the user's query by deciding which tool to call.
     """
-    # Initialize Groq client with environment variable
-    GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-    if not GROQ_API_KEY:
-        st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
-        return
-
-    groq_client = ChatGroq(
-        groq_api_key=GROQ_API_KEY,
-        model_name=os.environ.get("GROQ_MODEL", "mixtral-8x7b-32768")
-    )
-    
     messages = [
-        SystemMessage(
-            content="""
+        {"role": "system", "content": """
                 You are an AI assistant for database management. You can perform CRUD operations,
                 generate visualizations, and check database health.
                 Your tools are `sql_crud_tool`, `analyze_and_visualize_tool`, and `health_check_tool`.
                 Use `sql_crud_tool` for all data manipulation.
                 Use `analyze_and_visualize_tool` for all charts and reports.
                 Use `health_check_tool` for status checks.
-            """
-        ),
-        HumanMessage(content=prompt),
+        """},
+        {"role": "user", "content": prompt},
     ]
 
-    tool_config = {
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "sql_crud_tool",
-                    "description": "Performs all CRUD operations on the databases (MySQL and PostgreSQL).",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "operation": {"type": "string", "enum": ["select", "insert", "update", "delete", "describe", "list_tables"]},
-                            "database": {"type": "string", "enum": ["mysql", "postgres_products", "postgres_sales"]},
-                            "table_name": {"type": "string"},
-                            "columns": {"type": "string"},
-                            "where_clause": {"type": "string"},
-                            "data": {"type": "object"},
-                            "limit": {"type": "integer"}
-                        },
-                        "required": ["operation", "database", "table_name"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "analyze_and_visualize_tool",
-                    "description": "Generates data visualizations or detailed reports based on user queries.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "user_query": {"type": "string"},
-                            "database": {"type": "string", "enum": ["mysql", "postgres_products", "postgres_sales"]}
-                        },
-                        "required": ["user_query", "database"]
-                    }
-                }
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "health_check_tool",
-                    "description": "Checks the health and connectivity of the backend databases.",
-                    "parameters": {"type": "object", "properties": {}}
-                }
-            },
-        ]
-    }
-
     try:
-        chat_completion = groq_client.with_options(tool_choice="auto").invoke(messages, tools=tool_config["tools"])
-        response_message = chat_completion.content[0]
+        chat_completion = groq_client.chat.completions.with_options(tool_choice="auto").create(
+            messages=messages,
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "sql_crud_tool",
+                        "description": "Performs all CRUD operations on the databases (MySQL and PostgreSQL).",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "operation": {"type": "string", "enum": ["select", "insert", "update", "delete", "describe", "list_tables"]},
+                                "database": {"type": "string", "enum": ["mysql", "postgres_products", "postgres_sales"]},
+                                "table_name": {"type": "string"},
+                                "columns": {"type": "string"},
+                                "where_clause": {"type": "string"},
+                                "data": {"type": "object"},
+                                "limit": {"type": "integer"}
+                            },
+                            "required": ["operation", "database", "table_name"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "analyze_and_visualize_tool",
+                        "description": "Generates data visualizations or detailed reports based on user queries.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "user_query": {"type": "string"},
+                                "database": {"type": "string", "enum": ["mysql", "postgres_products", "postgres_sales"]}
+                            },
+                            "required": ["user_query", "database"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "health_check_tool",
+                        "description": "Checks the health and connectivity of the backend databases.",
+                        "parameters": {"type": "object", "properties": {}}
+                    }
+                },
+            ]
+        )
+        response_message = chat_completion.choices[0].message
         
-        if "tool_calls" in response_message:
-            tool_call = response_message["tool_calls"][0]
-            tool_name = tool_call["function"]["name"]
-            tool_args = json.loads(tool_call["function"]["arguments"])
+        if response_message.tool_calls:
+            tool_call = response_message.tool_calls[0]
+            tool_name = tool_call.function.name
+            tool_args = json.loads(tool_call.function.arguments)
             
             tool_call_message = {
                 "role": "tool_call",
@@ -293,20 +272,8 @@ async def process_user_query(prompt: str):
             }
             st.session_state.messages.append(tool_call_message)
 
-            if tool_name == "sql_crud_tool":
-                raw = await call_mcp_tool(tool_name, **tool_args)
-                reply_content, fmt = format_sql_crud(raw), "sql_crud"
-            elif tool_name == "analyze_and_visualize_tool":
-                raw = await call_mcp_tool(tool_name, **tool_args)
-                reply_content = raw
-                fmt = "visualization"
-            elif tool_name == "health_check_tool":
-                raw = await call_mcp_tool(tool_name, **tool_args)
-                reply_content = raw
-                fmt = "text"
-            else:
-                reply_content = {"result": f"❌ Unknown tool: {tool_name}"}
-                fmt = "text"
+            raw = await call_mcp_tool(tool_name, **tool_args)
+            reply_content, fmt = format_sql_crud(raw), "sql_crud"
 
             assistant_message = {
                 "role": "assistant",
@@ -320,7 +287,7 @@ async def process_user_query(prompt: str):
             }
             st.session_state.messages.append(assistant_message)
         else:
-            reply_content = {"result": chat_completion.content}
+            reply_content = {"result": response_message.content}
             fmt = "text"
             assistant_message = {
                 "role": "assistant",
@@ -395,44 +362,46 @@ def main():
 
     # Display the available tools in the sidebar
     with st.sidebar:
-        st.header("🎯 My Capabilities")
+        st.markdown("<div class='sidebar-title'>MCP CRUD Chat</div>", unsafe_allow_html=True)
+        st.image("https://placehold.co/300x150/4286f4/ffffff?text=Database+Visualizer", use_column_width=True)
+
         st.markdown(
             """
-            I can help you with:
-            - **Listing** and **querying** data
-            - **Adding**, **updating**, or **deleting** records
-            - **Analyzing** and **visualizing** data
-            - **Checking** database health
+            ### 🛠️ Key Features
+            - **Natural Language** Queries
+            - **Visualize** Data with Charts
+            - **Full CRUD** Support
+            - **Database Health** Checks
+            """
+        )
+        st.image("https://placehold.co/300x150/4286f4/ffffff?text=Real-time+Chat", use_column_width=True)
 
-            ---
-
-            ### 📚 Data Sources
-            - **MySQL:** `Customers` and `CarePlan` tables
-            - **PostgreSQL:** `products` and `sales` tables
-
-            ---
-
-            ### 📝 Example Queries
-            - **`list all customers`**
-            - **`show sales in march`**
-            - **`add a new customer named 'Jane Doe' with email 'jane.doe@example.com'`**
-            - **`update 'Jane Doe's email to 'jane.d@example.com'`**
-            - **`delete the sales record for product ID 'p123'`**
-            - **`what's the schema for the products table?`**
-            - **`show me a bar chart of sales by product name`**
-            - **`check database health`**
+        st.markdown(
+            """
+            ### 🎯 Pro Tips for Visualizations
+            1. **Be Specific**: "bar chart of sales by customer" works better than "chart sales"
+            2. **Use Data Context**: The system auto-detects the best data source based on your query
+            3. **Combine with Filters**: "bar chart of sales above $50"
+            4. **Multiple Views**: Use "dashboard" for comprehensive multi-chart analysis
+            5. **Quick Access**: Use the visualization buttons that appear after any data query
+            
+            ### 🔍 AI-Powered Insights
+            Every visualization includes:
+            - **Automatic trend analysis**
+            - **Key pattern detection**
+            - **Business insights and recommendations**
+            - **Export options for charts**
+            - **Interactive drill-down capabilities**
             """
         )
 
-    # Corrected client instantiation: We no longer need to explicitly
-    # pass StreamableHttpTransport. The Client handles it internally.
+    # Corrected client instantiation: We now use MCP_SERVER_URL and StreamableHttpTransport.
     try:
-        MCP_URL = os.environ.get("MCP_URL", "http://127.0.0.1:8000")
-        client = Client(base_url=f"{MCP_URL}/api")
+        MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://127.0.0.1:8000")
+        client = Client(base_url=f"{MCP_SERVER_URL}/api", transport=StreamableHttpTransport)
     except Exception as e:
         st.error(f"❌ Failed to connect to MCP Server: {e}")
         st.stop()
-
 
     # Initialize chat history
     if "messages" not in st.session_state:
@@ -460,7 +429,6 @@ def main():
             }, 80);
         </script>
     """)
-
 
 if __name__ == "__main__":
     main()
