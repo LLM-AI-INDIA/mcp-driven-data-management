@@ -2181,7 +2181,7 @@ if application == "MCP Application":
                                     "data": content["result"],
                                     "tool": tool,
                                     "chart_type": "pie",
-                                    "button_key:: pie_key
+                                    "button_key": pie_key
                                  }
                                  st.rerun()
                 
@@ -2600,5 +2600,6 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
 
 
