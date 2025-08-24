@@ -18,12 +18,6 @@ import hashlib
 import time
 
 load_dotenv()
-
-def hash_text(text):
-    """Create a hash for unique component keys"""
-    # Add a timestamp to ensure uniqueness
-    unique_text = f"{text}_{time.time()}"
-    return hashlib.md5(unique_text.encode()).hexdigest()[:8]
     
 # Initialize Groq client with environment variable
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
@@ -365,6 +359,12 @@ def hash_text(text):
     """Create a hash for unique component keys"""
     return hashlib.md5(str(text).encode()).hexdigest()[:8]
 
+# ADD THIS FUNCTION FOR UNIQUE KEY GENERATION
+def get_next_key(prefix=""):
+    """Get the next unique key using a counter"""
+    st.session_state.element_counter += 1
+    return f"{prefix}_{st.session_state.element_counter}"
+    
 def _clean_json(raw: str) -> str:
     fences = re.findall(r"``````", raw, re.DOTALL)
     if fences:
@@ -669,7 +669,7 @@ def render_visualization_section(viz_result, user_query):
     
     if fig:
         # Display the chart
-        st.plotly_chart(fig, use_container_width=True, key=f"chart_{hash_text(user_query + str(time.time()))}")
+        st.plotly_chart(fig, use_container_width=True, key=get_next_key("chart"))
         
         # Chart insights section
         with st.expander("📈 Chart Insights & Details", expanded=False):
@@ -1962,6 +1962,9 @@ if "menu_expanded" not in st.session_state:
 if "chat_input_box" not in st.session_state:
     st.session_state["chat_input_box"] = ""
 
+# ADD THIS LINE TO INITIALIZE THE COUNTER
+if "element_counter" not in st.session_state:
+    st.session_state.element_counter = 0
 # ========== MAIN ==========
 if application == "MCP Application":
     user_avatar_url = "https://cdn-icons-png.flaticon.com/512/1946/1946429.png"
@@ -2141,39 +2144,44 @@ if application == "MCP Application":
                         col1, col2, col3 = st.columns(3)
                         
                         unique_suffix = f"{hash_text(str(content))}_{int(time.time() * 1000) % 10000}"
-
+                        bar_key = generate_unique_key("bar")
+                        line_key = generate_unique_key("line") 
+                        pie_key = generate_unique_key("pie")
                         
                         with col1:
-                            if st.button("📊 Bar Chart", key=f"bar_{unique_suffix}"):
+                            if st.button("📊 Bar Chart", key=bar_key):
                                 # Create quick bar chart
                                 quick_viz_query = f"create a bar chart from this {tool.replace('_crud', '')} data"
                                 st.session_state.quick_viz_request = {
                                     "query": quick_viz_query,
                                     "data": content["result"],
                                     "tool": tool,
-                                    "chart_type": "bar"
+                                    "chart_type": "bar",
+                                    "button_key": bar_key
                                 }
                                 st.rerun()
 
                         with col2:
-                            if st.button("📈 Line Chart", key=f"line_{unique_suffix}"):
+                            if st.button("📈 Line Chart", key=line_key):
                                 quick_viz_query = f"create a line chart from this {tool.replace('_crud', '')} data"
                                 st.session_state.quick_viz_request = {
                                     "query": quick_viz_query,
                                     "data": content["result"],
                                     "tool": tool,
-                                    "chart_type": "line"
+                                    "chart_type": "line",
+                                    "button_key": line_key
                                 }
                                 st.rerun()
 
                         with col3:
-                            if st.button("🥧 Pie Chart", key=f"pie_{unique_suffix}"):
+                            if st.button("🥧 Pie Chart", key=pie_key):
                                 quick_viz_query = f"create a pie chart from this {tool.replace('_crud', '')} data"
                                 st.session_state.quick_viz_request = {
                                     "query": quick_viz_query,
                                     "data": content["result"],
                                     "tool": tool,
-                                    "chart_type": "pie"
+                                    "chart_type": "pie",
+                                    "button_key:: pie_key
                                  }
                                  st.rerun()
                 
@@ -2592,4 +2600,5 @@ with st.expander("🔧 ETL Functions & 📊 Visualization Examples"):
 # Add this section at the very end to prevent any import/layout issues
 if __name__ == "__main__":
     pass
+
 
