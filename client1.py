@@ -1485,45 +1485,55 @@ if application == "MCP Application":
         st.markdown("## 📊 Interactive Visualizations")
     
         # Create tabs for each visualization
-        tab_titles = [f"Visualization #{i+1}" for i in range(len(st.session_state.visualizations))]
-        viz_tabs = st.tabs(tab_titles)
+        try:
+            tab_titles = [f"Visualization #{i+1}" for i in range(len(st.session_state.visualizations))]
+            viz_tabs = st.tabs(tab_titles)
     
-        for i, (viz_html, user_query, viz_id) in enumerate(st.session_state.visualizations):
-            with viz_tabs[i]:
-                col1, col2 = st.columns([3, 1])
+            for i, viz_data in enumerate(st.session_state.visualizations):
+                with viz_tabs[i]:
+                    if len(viz_data) == 3:
+                        viz_html, user_query, viz_id = viz_data
+                    else:
+                        viz_html, user_query = viz_data
+                        viz_id = f"viz_legacy_{i}"
+                        
+                    col1, col2 = st.columns([3, 1])
             
-                with col1:
-                    st.markdown(f"**Query:** `{user_query}`")
-                    st.markdown(f"**Status:** `{st.session_state.visualization_status.get(viz_id, 'unknown').upper()}`")
+                    with col1:
+                        st.markdown(f"**Query:** `{user_query}`")
+                        status = st.session_state.visualization_status.get(viz_id, "completed")
+                        st.markdown(f"**Status:** `{status.upper()}`")
                 
                     # Render the visualization
-                    components.html(viz_html, height=500, scrolling=True)
+                        components.html(viz_html, height=500, scrolling=True)
             
-                with col2:
-                    st.markdown("### Actions")
-                    if st.button("📋 Show Code", key=f"show_code_{viz_id}"):
-                        with st.expander("Generated Code"):
-                            st.code(viz_html, language="html")
+                    with col2:
+                        st.markdown("### Actions")
+                        if st.button("📋 Show Code", key=f"show_code_{viz_id}"):
+                            with st.expander("Generated Code"):
+                                st.code(viz_html, language="html")
                 
-                    if st.button("🗑️ Remove", key=f"remove_{viz_id}"):
-                        st.session_state.visualizations.pop(i)
-                        st.session_state.visualization_status.pop(viz_id, None)
-                        st.rerun()
+                        if st.button("🗑️ Remove", key=f"remove_{viz_id}"):
+                            st.session_state.visualizations.pop(i)
+                            if viz_id in st.session_state.visualization_status:
+                                st.session_state.visualization_status.pop(viz_id)
+                            st.rerun()
                 
-                    if st.button("⭐ Make Primary", key=f"primary_{viz_id}"):
-                        st.session_state.active_viz_tab = i
+                        if st.button("⭐ Make Primary", key=f"primary_{viz_id}"):
+                            st.session_state.active_viz_tab = i
+
+        except Exception as e:
+            st.error(f"Error displaying visualizations: {str(e)}")
+            if st.button("🔄 Reset Visualizations"):
+                st.session_state.visualizations = []
+                st.session_state.visualization_status = {}
+                st.rerun()
 
     # Close main content wrapper
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ========== RIGHT SIDEBAR CONTENT ==========
-    # We'll use a container to simulate a right sidebar
+# ========== RIGHT SIDEBAR CONTENT ==========
     if st.session_state.show_right_sidebar:
-        with st.sidebar:
-            # This creates an empty left sidebar, we'll override its position
-            pass
-    
-        # Now create the actual right sidebar using absolute positioning
         right_sidebar_html = f"""
     <div style="
         position: fixed;
@@ -1561,11 +1571,13 @@ if application == "MCP Application":
                 cursor: pointer;
                 font-size: 14px;
             " onclick="alert('Switch to visualization {i+1}')">
-                <strong>#{i+1}:</strong> {viz[1][:25]}...
+                <strong>#{i+1}:</strong> {viz_data[1][:25]}...
                 <br>
-                <span style="font-size: 12px; color: #666;">{st.session_state.visualization_status.get(viz[2], 'unknown')}</span>
+                <span style="font-size: 12px; color: #666;">
+                    {st.session_state.visualization_status.get(viz_data[2] if len(viz_data) > 2 else f'viz_legacy_{i}', 'completed')}
+                </span>
             </div>
-            ''' for i, viz in enumerate(st.session_state.visualizations)]) if st.session_state.visualizations else 
+            ''' for i, viz_data in enumerate(st.session_state.visualizations)]) if st.session_state.visualizations else 
             '<p style="color: #999; font-style: italic;">No visualizations yet. Run a query to generate one!</p>'}
         </div>
         
@@ -1583,7 +1595,7 @@ if application == "MCP Application":
             </button>
         </div>
     </div>
-        """
+    """
     
         components.html(right_sidebar_html, height=0)
 
@@ -1774,7 +1786,7 @@ if application == "MCP Application":
             ):
                 with st.spinner("Generating visualization..."):
                     viz_html = generate_visualization(viz_data, user_query, tool)
-                    st.session_state.visualizations.append((viz_html, user_query))
+                    st.session_state.visualizations.append((viz_html, user_query, viz_id))
             
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
@@ -1868,6 +1880,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
