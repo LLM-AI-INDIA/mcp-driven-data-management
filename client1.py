@@ -1390,70 +1390,73 @@ if application == "MCP Application":
             )
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
-    # ========== CLAUDE-STYLE RIGHT SIDEBAR FOR VISUALIZATIONS ==========
+    # ========== CLAUDE-STYLE FLOATING SIDEBAR FOR VISUALIZATIONS ==========
     if st.session_state.visualizations:
         viz_items = ''.join([
             f'<div class="viz-item" onclick="showViz({i})">{user_query[:30]}...</div>'
             for i, (_, user_query) in enumerate(st.session_state.visualizations)
         ])
 
-        # Optional: Clear visualizations button
-        if st.button("🧹 Clear All Visualizations"):
-            st.session_state.visualizations = []
-            st.rerun()
+        viz_html_list = [v[0] for v in st.session_state.visualizations]
 
         components.html(f"""
-            <div class="right-sidebar">
-                <div class="right-sidebar-header">🎨 Visualization Studio</div>
-                <div class="viz-list">{viz_items}</div>
-                <div id="viz-display" style="flex:1; overflow:auto; margin-top:10px;">
-                    {st.session_state.visualizations[-1][0]} <!-- show last viz by default -->
-                </div>
+        <div class="viz-sidebar">
+            <div class="viz-header">🎨 Visualization Studio</div>
+            <div class="viz-list">{viz_items}</div>
+            <div id="viz-display" class="viz-display">
+                {viz_html_list[-1]}
             </div>
-            <style>
-                .right-sidebar {{
-                    position: fixed;
-                    top: 0;
-                    right: 0;
-                    width: 40%;
-                    height: 100%;
-                    background: #fff;
-                    border-left: 1px solid #ccc;
-                    display: flex;
-                    flex-direction: column;
-                    resize: horizontal;
-                    overflow: auto;
-                    z-index: 9999;
-                    padding: 15px;
-                }}
-                .viz-list {{
-                    flex: 0 0 auto;
-                    border-bottom: 1px solid #ddd;
-                    padding-bottom: 10px;
-                    margin-bottom: 10px;
-                }}
-                .viz-item {{
-                    cursor: pointer;
-                    padding: 6px;
-                    margin: 4px 0;
-                    background: #f0f0f0;
-                    border-radius: 6px;
-                }}
-                .viz-item:hover {{ background: #e0e0e0; }}
-                .right-sidebar-header {{
-                    font-weight: bold;
-                    font-size: 1.2rem;
-                    margin-bottom: 10px;
-                    color: #333;
-                }}
-            </style>
-            <script>
-                function showViz(index) {{
-                    const all = {json.dumps([v[0] for v in st.session_state.visualizations])};
-                    document.getElementById("viz-display").innerHTML = all[index];
-                }}
-            </script>
-        """, height=800, scrolling=True)
+        </div>
+        <style>
+            .viz-sidebar {{
+                position: fixed;
+                top: 0;
+                right: 0;
+                width: 40%;
+                height: 100%;
+                background: #fff;
+                border-left: 1px solid #ccc;
+                display: flex;
+                flex-direction: column;
+                overflow-y: auto;
+                z-index: 10000;
+                box-shadow: -2px 0 8px rgba(0,0,0,0.1);
+            }}
+            .viz-header {{
+                font-weight: bold;
+                font-size: 1.2rem;
+                padding: 12px;
+                border-bottom: 1px solid #ddd;
+                background: #f9f9f9;
+            }}
+            .viz-list {{
+                padding: 10px;
+                border-bottom: 1px solid #ddd;
+            }}
+            .viz-item {{
+                cursor: pointer;
+                padding: 6px;
+                margin: 4px 0;
+                background: #f0f0f0;
+                border-radius: 6px;
+            }}
+            .viz-item:hover {{
+                background: #e0e0e0;
+            }}
+            .viz-display {{
+                flex: 1;
+                padding: 10px;
+                overflow-y: auto;
+            }}
+        </style>
+        <script>
+            const vizList = {json.dumps(viz_html_list)};
+            function showViz(index) {{
+                document.getElementById("viz-display").innerHTML = vizList[index];
+            }}
+        </script>
+        """, height=900, scrolling=False)
+
 
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
@@ -1714,5 +1717,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
