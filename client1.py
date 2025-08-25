@@ -623,12 +623,13 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     RULES:
     1. Return ONLY raw HTML and JavaScript code
     2. Use Chart.js for visualizations (include CDN link)
-    3. Make it responsive and visually appealing
+    3. Make it responsive but set fixed height for charts (max 400px)
     4. Include appropriate titles and labels based on the user query
     5. Handle both tabular data and simple results
     6. No markdown, no explanations, just code
-    7. If data is complex, create multiple chart types (bar, line, pie)
-    8. Make sure the visualization fits in a container with proper dimensions
+    7. If data is complex, create multiple chart types (bar, line, pie) but limit to 2-3 charts
+    8. Use container div with fixed height and overflow: auto
+    9. Add 'chart-container' class to all chart containers
     """
     
     user_prompt = f"""
@@ -641,6 +642,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     
     Generate a comprehensive visualization that helps understand the data.
     Focus on the most important insights from the query.
+    Make sure charts have fixed heights and don't overflow.
     """
     
     try:
@@ -655,35 +657,43 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
         return visualization_code, visualization_code
     except Exception as e:
         # Fallback to a simple table if visualization generation fails
-        fallback_code = """
-        <div class="visualization-container">
-            <div class="visualization-title">Data Table</div>
-            <div id="table-container"></div>
-        </div>
-        <script>
-            const data = {json.dumps(data)};
-            let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
-            
-            // Add headers
-            tableHtml += '<tr>';
-            Object.keys(data[0]).forEach(key => {
-                tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${key}</th>`;
-            });
-            tableHtml += '</tr>';
-            
-            // Add rows
-            data.forEach(row => {
+        if isinstance(data, list) and len(data) > 0:
+            fallback_code = f"""
+            <div class="visualization-container" style="height: 400px; overflow: auto;">
+                <div class="visualization-title">Data Table</div>
+                <div id="table-container"></div>
+            </div>
+            <script>
+                const data = {json.dumps(data)};
+                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
+                
+                // Add headers
                 tableHtml += '<tr>';
-                Object.values(row).forEach(value => {
-                    tableHtml += `<td style="padding: 8px;">${value}</td>`;
-                });
+                Object.keys(data[0]).forEach(key => {{
+                    tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${{key}}</th>`;
+                }});
                 tableHtml += '</tr>';
-            });
-            
-            tableHtml += '</table>';
-            document.getElementById('table-container').innerHTML = tableHtml;
-        </script>
-        """
+                
+                // Add rows
+                data.forEach(row => {{
+                    tableHtml += '<tr>';
+                    Object.values(row).forEach(value => {{
+                        tableHtml += `<td style="padding: 8px;">${{value}}</td>`;
+                    }});
+                    tableHtml += '</tr>';
+                }});
+                
+                tableHtml += '</table>';
+                document.getElementById('table-container').innerHTML = tableHtml;
+            </script>
+            """
+        else:
+            fallback_code = f"""
+            <div class="visualization-container" style="height: 200px; overflow: auto;">
+                <div class="visualization-title">Result</div>
+                <p>{str(data)}</p>
+            </div>
+            """
         return fallback_code, fallback_code
 
 # Add this CSS for the split layout
@@ -701,7 +711,7 @@ st.markdown("""
         border-radius: 8px;
         padding: 15px;
         border: 1px solid #e9ecef;
-        max-height: 600px;
+        max-height: 500px;
         overflow-y: auto;
     }
     .viz-panel {
@@ -710,7 +720,7 @@ st.markdown("""
         border-radius: 8px;
         padding: 15px;
         border: 1px solid #e9ecef;
-        max-height: 600px;
+        max-height: 500px;
         overflow-y: auto;
     }
     .code-header, .viz-header {
@@ -733,8 +743,17 @@ st.markdown("""
     .copy-button:hover {
         background: #397dd2;
     }
+    .chart-container {
+        height: 350px !important;
+        margin-bottom: 20px;
+    }
+    .visualization-container {
+        height: 400px;
+        overflow: auto;
+    }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 
@@ -1444,39 +1463,25 @@ if application == "MCP Application":
     
         for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
             with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-                # Create split layout
-                st.markdown('<div class="split-container">', unsafe_allow_html=True)
-            
-                # Left panel: Code
-                st.markdown('<div class="code-panel">', unsafe_allow_html=True)
-                st.markdown(f'<div class="code-header">Generated Code <button class="copy-button" onclick="copyCode({i})">Copy Code</button></div>', unsafe_allow_html=True)
-                st.code(viz_code, language="html")
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-                # Right panel: Visualization
-                st.markdown('<div class="viz-panel">', unsafe_allow_html=True)
-                st.markdown('<div class="viz-header">Rendered Visualization</div>', unsafe_allow_html=True)
-                components.html(viz_html, height=500, scrolling=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-            
-        # Add JavaScript for copy functionality
-        components.html(f"""
-    <script>
-    function copyCode(index) {{
-        const code = `{viz_code.replace('`', '\\`')}`;
-        navigator.clipboard.writeText(code).then(() => {{
-            alert('Code copied to clipboard!');
-        }}).catch(err => {{
-            console.error('Failed to copy: ', err);
-        }});
-    }}
-    </script>
-        """, height=0)
-    
-        # Clear visualizations button
-        if st.button("🧹 Clear All Visualizations"):
+                # Use Streamlit columns instead of HTML for better layout control
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**Generated Code**")
+                    st.code(viz_code, language = "html")
+
+                    # Adding copy button
+                    if st.button("📋 Copy Code ", key = f"copy_{i}"):
+                        st.session_state.copied_code = viz_code
+                        st.success("Code copied to the clipboard")
+
+                with col2:
+                    st.markdown("**Rendered Visualization**")
+                    # Use a container with fixed height
+                    with st.container():
+                        components.html(viz_html, height = 400, scrolling = True)
+        
+        if st.button("🧹 Clear All Visualizations", key="clear_viz"):
             st.session_state.visualizations = []
             st.rerun()
 
@@ -1645,7 +1650,10 @@ if application == "MCP Application":
             ):
                 with st.spinner("Generating visualization..."):
                     viz_code, viz_html = generate_visualization(viz_data, user_query, tool)
-                    
+
+                # Add to visualization list with both code and HTML
+                if "visualizations" not in st.session_state:
+                    st.session_state.visualizations = []                    
                 st.session_state.visualizations.append((viz_html, viz_code, user_query))
 
                 st.success("Visualization generated successfully!")
@@ -1742,5 +1750,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
