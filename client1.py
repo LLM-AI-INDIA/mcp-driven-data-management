@@ -261,6 +261,7 @@ st.markdown("""
         font-weight: 500;
         font-size: 1.07rem;
     }
+    
     /* Visualization styles */
     .visualization-container {
         margin: 20px 0;
@@ -275,6 +276,66 @@ st.markdown("""
         margin-bottom: 10px;
         color: #333;
     }
+
+    
+    /* Right sidebar styling */
+.right-sidebar {
+    position: fixed;
+    right: 0;
+    top: 0;
+    width: 400px;
+    height: 100vh;
+    background: #f8f9fa;
+    border-left: 1px solid #ddd;
+    padding: 20px;
+    overflow-y: auto;
+    z-index: 999;
+    box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+}
+
+.right-sidebar-content {
+    padding: 10px;
+}
+
+/* Main content margin to accommodate right sidebar */
+.main-content {
+    margin-right: 420px !important;
+}
+
+@media (max-width: 1200px) {
+    .right-sidebar {
+        width: 350px;
+    }
+    .main-content {
+        margin-right: 370px !important;
+    }
+}
+
+@media (max-width: 1000px) {
+    .right-sidebar {
+        display: none;
+    }
+    .main-content {
+        margin-right: 0 !important;
+    }
+}
+
+/* Toggle button for mobile */
+.sidebar-toggle {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 1000;
+    background: #4286f4;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+}
     </style>
 """, unsafe_allow_html=True)
 
@@ -463,6 +524,15 @@ if "chat_input_box" not in st.session_state:
 if "visualizations" not in st.session_state:
     st.session_state.visualizations = []
 
+# Showing the right sidebar for the visualizations
+if "show_right_sidebar" not in st.session_state:
+    st.session_state.show_right_sidebar = True
+if "visualization_status" not in st.session_state:
+    st.session_state.visualization_status = {}
+if "current_viz_code" not in st.session_state:
+    st.session_state.current_viz_code = ""
+if "active_viz_lab" not in st.session_state:
+    st.session_state.active_viz_lab = 0
 
 # ========== HELPER FUNCTIONS ==========
 def _clean_json(raw: str) -> str:
@@ -602,93 +672,67 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 # ========== VISUALIZATION GENERATOR ==========
-def generate_visualization(data: any, user_query: str, tool: str) -> str:
+def generate_visualization(data: any, user_query: str, tool: str, viz_id: str) -> str:
     """
-    Generate JavaScript visualization code based on data and query
-    Returns HTML/JS code for the visualization
+    Generate JavaScript visualization code with streaming-like display in right sidebar
     """
+    # Set initial status
+    st.session_state.visualization_status[viz_id] = "generating"
+    st.session_state.current_viz_code = "// Starting visualization generation...\\n// Analyzing data structure..."
+    
+    # Force a rerun to update the sidebar
+    st.rerun()
     
     # Prepare context for the LLM
     context = {
         "user_query": user_query,
         "tool": tool,
         "data_type": type(data).__name__,
-        "data_sample": data[:5] if isinstance(data, list) and len(data) > 0 else data
+        "data_sample": data[:3] if isinstance(data, list) and len(data) > 0 else data
     }
     
     system_prompt = """
     You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
-    Analyze the data structure and user query to determine the most appropriate visualization.
-    
-    RULES:
-    1. Return ONLY raw HTML and JavaScript code
-    2. Use Chart.js for visualizations (include CDN link)
-    3. Make it responsive and visually appealing
-    4. Include appropriate titles and labels based on the user query
-    5. Handle both tabular data and simple results
-    6. No markdown, no explanations, just code
-    7. If data is complex, create multiple chart types (bar, line, pie)
-    8. Make sure the visualization fits in a container with proper dimensions
+    Return ONLY raw HTML and JavaScript code with Chart.js CDN included.
     """
     
-    user_prompt = f"""
-    Create an interactive visualization for this data:
-    
-    User Query: "{user_query}"
-    Tool Used: {tool}
-    Data Type: {context['data_type']}
-    Data Sample: {json.dumps(context['data_sample'], indent=2)}
-    
-    Generate a comprehensive visualization that helps understand the data.
-    Focus on the most important insights from the query.
-    """
+    user_prompt = f"Create visualization for: {user_query}\\nData: {json.dumps(context['data_sample'], indent=2)}"
     
     try:
+        # Simulate step-by-step generation
+        steps = [
+            "// Connecting to visualization engine...",
+            "// Analyzing data structure...",
+            "// Selecting appropriate chart types...",
+            "// Generating Chart.js configuration...",
+            "// Building interactive components...",
+            "// Finalizing visualization..."
+        ]
+        
+        for step in steps:
+            st.session_state.current_viz_code = step
+            st.rerun()
+            time.sleep(0.5)  # Simulate processing time
+        
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
+        
         response = groq_client.invoke(messages)
-        return response.content.strip()
+        generated_code = response.content.strip()
+        
+        # Update status and store final code
+        st.session_state.visualization_status[viz_id] = "completed"
+        st.session_state.current_viz_code = generated_code
+        
+        return generated_code
+        
     except Exception as e:
-        # Fallback to a simple table if visualization generation fails
-        if isinstance(data, list) and len(data) > 0:
-            return f"""
-            <div class="visualization-container">
-                <div class="visualization-title">Data Table</div>
-                <div id="table-container"></div>
-            </div>
-            <script>
-                const data = {json.dumps(data)};
-                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
-                
-                // Add headers
-                tableHtml += '<tr>';
-                Object.keys(data[0]).forEach(key => {{
-                    tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${{key}}</th>`;
-                }});
-                tableHtml += '</tr>';
-                
-                // Add rows
-                data.forEach(row => {{
-                    tableHtml += '<tr>';
-                    Object.values(row).forEach(value => {{
-                        tableHtml += `<td style="padding: 8px;">${{value}}</td>`;
-                    }});
-                    tableHtml += '</tr>';
-                }});
-                
-                tableHtml += '</table>';
-                document.getElementById('table-container').innerHTML = tableHtml;
-            </script>
-            """
-        else:
-            return f"""
-            <div class="visualization-container">
-                <div class="visualization-title">Result</div>
-                <p>{str(data)}</p>
-            </div>
-            """
+        error_code = f"// Error generating visualization: {str(e)}"
+        st.session_state.visualization_status[viz_id] = "error"
+        st.session_state.current_viz_code = error_code
+        return f"<div style='padding: 20px; color: red;'>Visualization Error: {str(e)}</div>"
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
@@ -1175,7 +1219,7 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
     }
 
     system_prompt = (
-        "You are a data analyst. Generate a brief, insightful 1-line description "
+        "You are a data analyst. Generate a brief, concise insightful description (2 or 3 lines)"
         "of the table data based on the JSON response. Focus on what the data represents "
         "and any interesting patterns you notice. Be concise and business-focused."
     )
@@ -1391,18 +1435,179 @@ if application == "MCP Application":
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
     # ========== 2. RENDER VISUALIZATIONS ==========
+    
+    # ========== RIGHT SIDEBAR FOR VISUALIZATIONS ==========
+    if st.session_state.show_right_sidebar:
+        components.html(f"""
+            <div class="right-sidebar">
+                <div class="right-sidebar-content">
+                    <h3 style="color: #333; margin-bottom: 20px;">🎨 Visualization Studio</h3>
+                    {'''.join([f'<div class="viz-item">{viz[1][:30]}...</div>' for viz in st.session_state.visualizations]) if st.session_state.visualizations else '<p>No visualizations yet</p>'}
+                </div>
+            </div>
+            <style>
+            .right-sidebar {{
+                position: fixed;
+                right: 0;
+                top: 0;
+                width: 400px;
+                height: 100vh;
+                background: #f8f9fa;
+                border-left: 1px solid #ddd;
+                padding: 20px;
+                overflow-y: auto;
+                z-index: 999;
+                box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            }}
+            .right-sidebar-content {{
+                padding: 10px;
+            }}
+            .viz-item {{
+                padding: 10px;
+                margin: 5px 0;
+                background: white;
+                border-radius: 5px;
+                border: 1px solid #eee;
+                cursor: pointer;
+                }}
+                .viz-item:hover {{
+                    background: #e3f2fd;
+                }}
+            </style>
+        """, height=0)  # Height 0 makes it invisible, we're just injecting CSS
+
+    # Main content wrapper
+    st.markdown('<div class="main-content">', unsafe_allow_html=True)
+
+# ========== VISUALIZATION MANAGEMENT ==========
     if st.session_state.visualizations:
         st.markdown("---")
         st.markdown("## 📊 Interactive Visualizations")
-        
-        for i, (viz_html, user_query) in enumerate(st.session_state.visualizations):
-            with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-                components.html(viz_html, height=600, scrolling=True)
+    
+        # Create tabs for each visualization
+        tab_titles = [f"Visualization #{i+1}" for i in range(len(st.session_state.visualizations))]
+        viz_tabs = st.tabs(tab_titles)
+    
+        for i, (viz_html, user_query, viz_id) in enumerate(st.session_state.visualizations):
+            with viz_tabs[i]:
+                col1, col2 = st.columns([3, 1])
+            
+                with col1:
+                    st.markdown(f"**Query:** `{user_query}`")
+                    st.markdown(f"**Status:** `{st.session_state.visualization_status.get(viz_id, 'unknown').upper()}`")
                 
-        # Clear visualizations button
-        if st.button("🧹 Clear All Visualizations"):
-            st.session_state.visualizations = []
-            st.rerun()
+                    # Render the visualization
+                    components.html(viz_html, height=500, scrolling=True)
+            
+                with col2:
+                    st.markdown("### Actions")
+                    if st.button("📋 Show Code", key=f"show_code_{viz_id}"):
+                        with st.expander("Generated Code"):
+                            st.code(viz_html, language="html")
+                
+                    if st.button("🗑️ Remove", key=f"remove_{viz_id}"):
+                        st.session_state.visualizations.pop(i)
+                        st.session_state.visualization_status.pop(viz_id, None)
+                        st.rerun()
+                
+                    if st.button("⭐ Make Primary", key=f"primary_{viz_id}"):
+                        st.session_state.active_viz_tab = i
+
+    # Close main content wrapper
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ========== RIGHT SIDEBAR CONTENT ==========
+    # We'll use a container to simulate a right sidebar
+    if st.session_state.show_right_sidebar:
+        with st.sidebar:
+            # This creates an empty left sidebar, we'll override its position
+            pass
+    
+        # Now create the actual right sidebar using absolute positioning
+        right_sidebar_html = f"""
+    <div style="
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 400px;
+        height: 100vh;
+        background: #f8f9fa;
+        border-left: 1px solid #ddd;
+        padding: 20px;
+        overflow-y: auto;
+        z-index: 999;
+        box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+    ">
+        <h3 style="color: #333; margin-bottom: 20px; border-bottom: 2px solid #4286f4; padding-bottom: 10px;">
+            🎨 Visualization Studio
+        </h3>
+        
+        <div style="margin-bottom: 20px;">
+            <h4 style="color: #666; margin-bottom: 10px;">🔄 Live Generation</h4>
+            <div style="background: #fff; border: 1px solid #eee; border-radius: 5px; padding: 10px; font-family: monospace; font-size: 12px; max-height: 150px; overflow-y: auto;">
+                {st.session_state.current_viz_code.replace('<', '&lt;').replace('>', '&gt;') if st.session_state.current_viz_code else "// No active code generation"}
+            </div>
+        </div>
+        
+        <div>
+            <h4 style="color: #666; margin-bottom: 10px;">📊 Visualization History</h4>
+            {"".join([f'''
+            <div style="
+                padding: 10px;
+                margin: 8px 0;
+                background: {'#e3f2fd' if st.session_state.active_viz_tab == i else '#fff'};
+                border: 1px solid {'#4286f4' if st.session_state.active_viz_tab == i else '#eee'};
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 14px;
+            " onclick="alert('Switch to visualization {i+1}')">
+                <strong>#{i+1}:</strong> {viz[1][:25]}...
+                <br>
+                <span style="font-size: 12px; color: #666;">{st.session_state.visualization_status.get(viz[2], 'unknown')}</span>
+            </div>
+            ''' for i, viz in enumerate(st.session_state.visualizations)]) if st.session_state.visualizations else 
+            '<p style="color: #999; font-style: italic;">No visualizations yet. Run a query to generate one!</p>'}
+        </div>
+        
+        <div style="position: absolute; bottom: 20px; width: calc(100% - 40px);">
+            <button style="
+                width: 100%;
+                padding: 10px;
+                background: #4286f4;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+            " onclick="alert('Toggle sidebar')">
+                Hide Sidebar
+            </button>
+        </div>
+    </div>
+        """
+    
+        components.html(right_sidebar_html, height=0)
+
+    # Toggle button for mobile
+    components.html("""
+    <button class="sidebar-toggle" onclick="alert('Toggle sidebar')">📊</button>
+    <style>
+        .sidebar-toggle {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            z-index: 1000;
+            background: #4286f4;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+    </style>
+    """, height=0)
 
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
@@ -1663,6 +1868,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
