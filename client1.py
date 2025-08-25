@@ -1788,10 +1788,10 @@ if application == "MCP Application":
                 (isinstance(viz_data, list) and len(viz_data) > 0) or 
                 (isinstance(viz_data, dict) and len(viz_data) > 0)
             ):
-                with st.spinner("Generating visualization..."):
-                    viz_id = f"viz_{int(time.time())}_{len(st.session_state.visualizations)}"
-                    viz_html = generate_visualization(viz_data, user_query, tool, viz_id)
+                with st.spinner("🧠 Generating interactive visualization..."):
+                    viz_html, viz_id = generate_visualization(viz_data, user_query, tool)
                     st.session_state.visualizations.append((viz_html, user_query, viz_id))
+                    st.rerun()
             
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
@@ -1885,6 +1885,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
