@@ -1,4 +1,4 @@
-import os, re, json, ast, asyncio
+import os, re, json, ast, asyncio, time
 import pandas as pd
 import streamlit as st
 import base64
@@ -1885,6 +1885,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
