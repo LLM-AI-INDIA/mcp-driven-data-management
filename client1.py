@@ -1390,70 +1390,70 @@ if application == "MCP Application":
             )
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
-# ========== CLAUDE-STYLE RIGHT SIDEBAR FOR VISUALIZATIONS ==========
-if st.session_state.visualizations:
-    viz_items = ''.join([
-        f'<div class="viz-item" onclick="showViz({i})">{user_query[:30]}...</div>'
-        for i, (_, user_query) in enumerate(st.session_state.visualizations)
-    ])
-    
-    if st.button("🧹 Clear All Visualizations"):
-        st.session_state.visualizations = []
-        st.rerun()
+    # ========== CLAUDE-STYLE RIGHT SIDEBAR FOR VISUALIZATIONS ==========
+    if st.session_state.visualizations:
+        viz_items = ''.join([
+            f'<div class="viz-item" onclick="showViz({i})">{user_query[:30]}...</div>'
+            for i, (_, user_query) in enumerate(st.session_state.visualizations)
+        ])
 
-    components.html(f"""
-        <div class="right-sidebar">
-            <div class="right-sidebar-header">🎨 Visualization Studio</div>
-            <div class="viz-list">{viz_items}</div>
-            <div id="viz-display" style="flex:1; overflow:auto; margin-top:10px;">
-                {st.session_state.visualizations[-1][0]} <!-- show last viz by default -->
+        # Optional: Clear visualizations button
+        if st.button("🧹 Clear All Visualizations"):
+            st.session_state.visualizations = []
+            st.rerun()
+
+        components.html(f"""
+            <div class="right-sidebar">
+                <div class="right-sidebar-header">🎨 Visualization Studio</div>
+                <div class="viz-list">{viz_items}</div>
+                <div id="viz-display" style="flex:1; overflow:auto; margin-top:10px;">
+                    {st.session_state.visualizations[-1][0]} <!-- show last viz by default -->
+                </div>
             </div>
-        </div>
-        <style>
-            .right-sidebar {{
-                position: fixed;
-                top: 0;
-                right: 0;
-                width: 40%;
-                height: 100%;
-                background: #fff;
-                border-left: 1px solid #ccc;
-                display: flex;
-                flex-direction: column;
-                resize: horizontal;
-                overflow: auto;
-                z-index: 9999;
-                padding: 15px;
-            }}
-            .viz-list {{
-                flex: 0 0 auto;
-                border-bottom: 1px solid #ddd;
-                padding-bottom: 10px;
-                margin-bottom: 10px;
-            }}
-            .viz-item {{
-                cursor: pointer;
-                padding: 6px;
-                margin: 4px 0;
-                background: #f0f0f0;
-                border-radius: 6px;
-            }}
-            .viz-item:hover {{ background: #e0e0e0; }}
-            .right-sidebar-header {{
-                font-weight: bold;
-                font-size: 1.2rem;
-                margin-bottom: 10px;
-                color: #333;
-            }}
-        </style>
-        <script>
-            function showViz(index) {{
-                const all = {json.dumps([v[0] for v in st.session_state.visualizations])};
-                document.getElementById("viz-display").innerHTML = all[index];
-            }}
-        </script>
-    """, height=800, scrolling=True)
-
+            <style>
+                .right-sidebar {{
+                    position: fixed;
+                    top: 0;
+                    right: 0;
+                    width: 40%;
+                    height: 100%;
+                    background: #fff;
+                    border-left: 1px solid #ccc;
+                    display: flex;
+                    flex-direction: column;
+                    resize: horizontal;
+                    overflow: auto;
+                    z-index: 9999;
+                    padding: 15px;
+                }}
+                .viz-list {{
+                    flex: 0 0 auto;
+                    border-bottom: 1px solid #ddd;
+                    padding-bottom: 10px;
+                    margin-bottom: 10px;
+                }}
+                .viz-item {{
+                    cursor: pointer;
+                    padding: 6px;
+                    margin: 4px 0;
+                    background: #f0f0f0;
+                    border-radius: 6px;
+                }}
+                .viz-item:hover {{ background: #e0e0e0; }}
+                .right-sidebar-header {{
+                    font-weight: bold;
+                    font-size: 1.2rem;
+                    margin-bottom: 10px;
+                    color: #333;
+                }}
+            </style>
+            <script>
+                function showViz(index) {{
+                    const all = {json.dumps([v[0] for v in st.session_state.visualizations])};
+                    document.getElementById("viz-display").innerHTML = all[index];
+                }}
+            </script>
+        """, height=800, scrolling=True)
 
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
@@ -1714,4 +1714,5 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
