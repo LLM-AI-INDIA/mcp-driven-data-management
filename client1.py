@@ -1442,7 +1442,7 @@ if application == "MCP Application":
             <div class="right-sidebar">
                 <div class="right-sidebar-content">
                     <h3 style="color: #333; margin-bottom: 20px;">🎨 Visualization Studio</h3>
-                    {'''.join([f'<div class="viz-item">{viz[1][:30]}...</div>' for viz in st.session_state.visualizations]) if st.session_state.visualizations else '<p>No visualizations yet</p>'}
+                    {''.join([f'<div class="viz-item">{viz[1][:30]}...</div>' for viz in st.session_state.visualizations]) if st.session_state.visualizations else '<p>No visualizations yet</p>'}
                 </div>
             </div>
             <style>
@@ -1868,6 +1868,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
