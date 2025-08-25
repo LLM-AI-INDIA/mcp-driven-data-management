@@ -672,10 +672,14 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 # ========== VISUALIZATION GENERATOR ==========
-def generate_visualization(data: any, user_query: str, tool: str, viz_id: str) -> str:
+def generate_visualization(data: any, user_query: str, tool: str, viz_id: str = None) -> str:
     """
     Generate JavaScript visualization code with streaming-like display in right sidebar
     """
+    # Generate viz_id if not provided
+    if viz_id is None:
+        viz_id = f"viz_{int(time.time())}_{len(st.session_state.get('visualizations', []))}"
+    
     # Set initial status
     st.session_state.visualization_status[viz_id] = "generating"
     st.session_state.current_viz_code = "// Starting visualization generation...\\n// Analyzing data structure..."
@@ -1785,7 +1789,8 @@ if application == "MCP Application":
                 (isinstance(viz_data, dict) and len(viz_data) > 0)
             ):
                 with st.spinner("Generating visualization..."):
-                    viz_html = generate_visualization(viz_data, user_query, tool)
+                    viz_id = f"viz_{int(time.time())}_{len(st.session_state.visualizations)}"
+                    viz_html = generate_visualization(viz_data, user_query, tool, viz_id)
                     st.session_state.visualizations.append((viz_html, user_query, viz_id))
             
         except Exception as e:
@@ -1880,6 +1885,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
