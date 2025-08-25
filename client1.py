@@ -602,10 +602,10 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 # ========== VISUALIZATION GENERATOR ==========
-def generate_visualization(data: any, user_query: str, tool: str) -> str:
+def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     """
     Generate JavaScript visualization code based on data and query
-    Returns HTML/JS code for the visualization
+    Returns tuple of (HTML/JS code for the visualization, raw code)
     """
     
     # Prepare context for the LLM
@@ -649,46 +649,93 @@ def generate_visualization(data: any, user_query: str, tool: str) -> str:
             HumanMessage(content=user_prompt)
         ]
         response = groq_client.invoke(messages)
-        return response.content.strip()
+        visualization_code = response.content.strip()
+        
+        # Return both the code and the rendered HTML
+        return visualization_code, visualization_code
     except Exception as e:
         # Fallback to a simple table if visualization generation fails
-        if isinstance(data, list) and len(data) > 0:
-            return f"""
-            <div class="visualization-container">
-                <div class="visualization-title">Data Table</div>
-                <div id="table-container"></div>
-            </div>
-            <script>
-                const data = {json.dumps(data)};
-                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
-                
-                // Add headers
+        fallback_code = """
+        <div class="visualization-container">
+            <div class="visualization-title">Data Table</div>
+            <div id="table-container"></div>
+        </div>
+        <script>
+            const data = {json.dumps(data)};
+            let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
+            
+            // Add headers
+            tableHtml += '<tr>';
+            Object.keys(data[0]).forEach(key => {
+                tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${key}</th>`;
+            });
+            tableHtml += '</tr>';
+            
+            // Add rows
+            data.forEach(row => {
                 tableHtml += '<tr>';
-                Object.keys(data[0]).forEach(key => {{
-                    tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${{key}}</th>`;
-                }});
+                Object.values(row).forEach(value => {
+                    tableHtml += `<td style="padding: 8px;">${value}</td>`;
+                });
                 tableHtml += '</tr>';
-                
-                // Add rows
-                data.forEach(row => {{
-                    tableHtml += '<tr>';
-                    Object.values(row).forEach(value => {{
-                        tableHtml += `<td style="padding: 8px;">${{value}}</td>`;
-                    }});
-                    tableHtml += '</tr>';
-                }});
-                
-                tableHtml += '</table>';
-                document.getElementById('table-container').innerHTML = tableHtml;
-            </script>
-            """
-        else:
-            return f"""
-            <div class="visualization-container">
-                <div class="visualization-title">Result</div>
-                <p>{str(data)}</p>
-            </div>
-            """
+            });
+            
+            tableHtml += '</table>';
+            document.getElementById('table-container').innerHTML = tableHtml;
+        </script>
+        """
+        return fallback_code, fallback_code
+
+# Add this CSS for the split layout
+st.markdown("""
+    <style>
+    .split-container {
+        display: flex;
+        width: 100%;
+        gap: 20px;
+        margin: 20px 0;
+    }
+    .code-panel {
+        flex: 1;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid #e9ecef;
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    .viz-panel {
+        flex: 1;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid #e9ecef;
+        max-height: 600px;
+        overflow-y: auto;
+    }
+    .code-header, .viz-header {
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .copy-button {
+        background: #4286f4;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.8rem;
+    }
+    .copy-button:hover {
+        background: #397dd2;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
@@ -1394,11 +1441,40 @@ if application == "MCP Application":
     if st.session_state.visualizations:
         st.markdown("---")
         st.markdown("## 📊 Interactive Visualizations")
-        
-        for i, (viz_html, user_query) in enumerate(st.session_state.visualizations):
+    
+        for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
             with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-                components.html(viz_html, height=600, scrolling=True)
+                # Create split layout
+                st.markdown('<div class="split-container">', unsafe_allow_html=True)
+            
+                # Left panel: Code
+                st.markdown('<div class="code-panel">', unsafe_allow_html=True)
+                st.markdown(f'<div class="code-header">Generated Code <button class="copy-button" onclick="copyCode({i})">Copy Code</button></div>', unsafe_allow_html=True)
+                st.code(viz_code, language="html")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+                # Right panel: Visualization
+                st.markdown('<div class="viz-panel">', unsafe_allow_html=True)
+                st.markdown('<div class="viz-header">Rendered Visualization</div>', unsafe_allow_html=True)
+                components.html(viz_html, height=500, scrolling=True)
+                st.markdown('</div>', unsafe_allow_html=True)
                 
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+        # Add JavaScript for copy functionality
+        components.html(f"""
+    <script>
+    function copyCode(index) {{
+        const code = `{viz_code.replace('`', '\\`')}`;
+        navigator.clipboard.writeText(code).then(() => {{
+            alert('Code copied to clipboard!');
+        }}).catch(err => {{
+            console.error('Failed to copy: ', err);
+        }});
+    }}
+    </script>
+        """, height=0)
+    
         # Clear visualizations button
         if st.button("🧹 Clear All Visualizations"):
             st.session_state.visualizations = []
@@ -1568,8 +1644,11 @@ if application == "MCP Application":
                 (isinstance(viz_data, dict) and len(viz_data) > 0)
             ):
                 with st.spinner("Generating visualization..."):
-                    viz_html = generate_visualization(viz_data, user_query, tool)
-                    st.session_state.visualizations.append((viz_html, user_query))
+                    viz_code, viz_html = generate_visualization(viz_data, user_query, tool)
+                    
+                st.session_state.visualizations.append((viz_html, viz_code, user_query))
+
+                st.success("Visualization generated successfully!")
             
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
@@ -1663,4 +1742,5 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
