@@ -261,6 +261,20 @@ st.markdown("""
         font-weight: 500;
         font-size: 1.07rem;
     }
+    /* Visualization styles */
+    .visualization-container {
+        margin: 20px 0;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #f9f9f9;
+    }
+    .visualization-title {
+        font-size: 1.2rem;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #333;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -373,9 +387,6 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-
-
-
 logo_path = "Picture1.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
@@ -447,6 +458,10 @@ if "menu_expanded" not in st.session_state:
     st.session_state["menu_expanded"] = True
 if "chat_input_box" not in st.session_state:
     st.session_state["chat_input_box"] = ""
+
+# Initialize visualization state
+if "visualizations" not in st.session_state:
+    st.session_state.visualizations = []
 
 
 # ========== HELPER FUNCTIONS ==========
@@ -584,6 +599,96 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
             return f"Successfully retrieved table schema from {tool}."
         else:
             return f"Operation completed successfully using {tool}."
+
+
+# ========== VISUALIZATION GENERATOR ==========
+def generate_visualization(data: any, user_query: str, tool: str) -> str:
+    """
+    Generate JavaScript visualization code based on data and query
+    Returns HTML/JS code for the visualization
+    """
+    
+    # Prepare context for the LLM
+    context = {
+        "user_query": user_query,
+        "tool": tool,
+        "data_type": type(data).__name__,
+        "data_sample": data[:5] if isinstance(data, list) and len(data) > 0 else data
+    }
+    
+    system_prompt = """
+    You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
+    Analyze the data structure and user query to determine the most appropriate visualization.
+    
+    RULES:
+    1. Return ONLY raw HTML and JavaScript code
+    2. Use Chart.js for visualizations (include CDN link)
+    3. Make it responsive and visually appealing
+    4. Include appropriate titles and labels based on the user query
+    5. Handle both tabular data and simple results
+    6. No markdown, no explanations, just code
+    7. If data is complex, create multiple chart types (bar, line, pie)
+    8. Make sure the visualization fits in a container with proper dimensions
+    """
+    
+    user_prompt = f"""
+    Create an interactive visualization for this data:
+    
+    User Query: "{user_query}"
+    Tool Used: {tool}
+    Data Type: {context['data_type']}
+    Data Sample: {json.dumps(context['data_sample'], indent=2)}
+    
+    Generate a comprehensive visualization that helps understand the data.
+    Focus on the most important insights from the query.
+    """
+    
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+        response = groq_client.invoke(messages)
+        return response.content.strip()
+    except Exception as e:
+        # Fallback to a simple table if visualization generation fails
+        if isinstance(data, list) and len(data) > 0:
+            return f"""
+            <div class="visualization-container">
+                <div class="visualization-title">Data Table</div>
+                <div id="table-container"></div>
+            </div>
+            <script>
+                const data = {json.dumps(data)};
+                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
+                
+                // Add headers
+                tableHtml += '<tr>';
+                Object.keys(data[0]).forEach(key => {{
+                    tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${{key}}</th>`;
+                }});
+                tableHtml += '</tr>';
+                
+                // Add rows
+                data.forEach(row => {{
+                    tableHtml += '<tr>';
+                    Object.values(row).forEach(value => {{
+                        tableHtml += `<td style="padding: 8px;">${{value}}</td>`;
+                    }});
+                    tableHtml += '</tr>';
+                }});
+                
+                tableHtml += '</table>';
+                document.getElementById('table-container').innerHTML = tableHtml;
+            </script>
+            """
+        else:
+            return f"""
+            <div class="visualization-container">
+                <div class="visualization-title">Result</div>
+                <p>{str(data)}</p>
+            </div>
+            """
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
@@ -759,21 +864,13 @@ Respond with the exact JSON format with properly extracted parameters."""
                 
                 # Enhanced regex patterns for delete operations
                 delete_patterns = [
-                    r'(?:delete|remove)\s+(?:product\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
-                    r'(?:delete|remove)\s+(?:customer\s+)?([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)',
-                    r'(?:delete|remove)\s+([A-Za-z][A-Za-z0-9\s]*?)(?:\s|$)'
+                    r'(?:delete|remove)\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+                    r'(?:delete|remove)\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+                    r'(?:delete|remove)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
+                    r'(?:update|change)\s+(?:price\s+of\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)',
                 ]
                 
-                # Enhanced regex patterns for update operations
-                update_patterns = [
-                    r'(?:update|change|set)\s+(?:price\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
-                    r'(?:update|change|set)\s+(?:email\s+of\s+)?([A-Za-z][A-Za-z0-9\s]*?)\s+(?:to|=|\s+)',
-                    r'(?:update|change|set)\s+([A-Za-z][A-Za-z0-9\s]*?)\s+(?:price|email)\s+(?:to|=)',
-                ]
-                
-                all_patterns = delete_patterns + update_patterns
-                
-                for pattern in all_patterns:
+                for pattern in delete_patterns:
                     match = re.search(pattern, query, re.IGNORECASE)
                     if match:
                         extracted_name = match.group(1).strip()
@@ -782,7 +879,6 @@ Respond with the exact JSON format with properly extracted parameters."""
                         name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
                         if name_words:
                             args["name"] = ' '.join(name_words)
-                            print(f"DEBUG: Extracted name '{args['name']}' from query '{query}'")
                             break
             
             # Extract new_price for product updates
@@ -791,7 +887,6 @@ Respond with the exact JSON format with properly extracted parameters."""
                 price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
                 if price_match:
                     args["new_price"] = float(price_match.group(1))
-                    print(f"DEBUG: Extracted new_price '{args['new_price']}' from query '{query}'")
             
             # Extract new_email for customer updates
             if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
@@ -799,7 +894,6 @@ Respond with the exact JSON format with properly extracted parameters."""
                 email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
                 if email_match:
                     args["new_email"] = email_match.group(1)
-                    print(f"DEBUG: Extracted new_email '{args['new_email']}' from query '{query}'")
             
             result["args"] = args
 
@@ -951,9 +1045,6 @@ Respond with the exact JSON format with properly extracted parameters."""
         # Validate tool selection
         if "tool" in result and result["tool"] not in available_tools:
             result["tool"] = list(available_tools.keys())[0]
-
-        # Debug output
-        print(f"DEBUG: Final parsed result for '{query}': {result}")
 
         return result
 
@@ -1299,7 +1390,21 @@ if application == "MCP Application":
             )
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
-    # ========== 2. CLAUDE-STYLE STICKY CHAT BAR ==========
+    # ========== 2. RENDER VISUALIZATIONS ==========
+    if st.session_state.visualizations:
+        st.markdown("---")
+        st.markdown("## 📊 Interactive Visualizations")
+        
+        for i, (viz_html, user_query) in enumerate(st.session_state.visualizations):
+            with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
+                components.html(viz_html, height=600, scrolling=True)
+                
+        # Clear visualizations button
+        if st.button("🧹 Clear All Visualizations"):
+            st.session_state.visualizations = []
+            st.rerun()
+
+    # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
         chatbar_cols = st.columns([1, 16, 1])  # Left: hamburger, Middle: input, Right: send
@@ -1344,7 +1449,7 @@ if application == "MCP Application":
         st.rerun()
 
     # ========== PROCESS CHAT INPUT ==========
-    if send_clicked and user_query_input:
+    if user_query_input and send_clicked:
         user_query = user_query_input
         user_steps = []
         try:
@@ -1450,6 +1555,22 @@ if application == "MCP Application":
                     args["table_name"] = "products"
 
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
+            
+            # ========== GENERATE VISUALIZATION ==========
+            # Extract data for visualization
+            viz_data = raw
+            if isinstance(raw, dict) and "result" in raw:
+                viz_data = raw["result"]
+            
+            # Generate visualization for read operations with data
+            if action == "read" and viz_data and (
+                (isinstance(viz_data, list) and len(viz_data) > 0) or 
+                (isinstance(viz_data, dict) and len(viz_data) > 0)
+            ):
+                with st.spinner("Generating visualization..."):
+                    viz_html = generate_visualization(viz_data, user_query, tool)
+                    st.session_state.visualizations.append((viz_html, user_query))
+            
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
             assistant_message = {
