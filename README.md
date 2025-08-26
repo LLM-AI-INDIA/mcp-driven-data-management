@@ -215,8 +215,6 @@ Sample Prompts:
 
 -> _mysql_connector.MySQLInterfaceError: Commands out of sync: This often occurs during database seeding if multiple SQL commands are sent too rapidly on the same cursor, or if autocommit is mismanaged. The current seed_databases implementation attempts to mitigate this by separating commands and managing transactions explicitly.
 
-        Solution: Ensure your Server_Tools1.py is the latest version from this repository. If the error persists, it might indicate a specific version incompatibility with mysql-connector-python or an underlying network latency issue during rapid database operations.
-
 -> If you are unable to use the `pyodbc` library, depending on the OS of the deployment machine - use the appropriate cmd. Check [here](https://stackoverflow.com/questions/2960339/unable-to-install-pyodbc-on-linux)
 
 -> For UI issues, check your `client1.py` file
