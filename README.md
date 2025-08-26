@@ -1,5 +1,18 @@
 # MCP-Driven Data Management System
 
+**Authors:**
+- Mr.Jothi Periasamy
+- Lokit S
+- Hrushikesh A
+- Samyukhtha R
+- Pradyun S
+- Myself
+
+
+## Note
+Will soon attach the link of the official repo and report here!!
+
+
 This repository contains the code for a multi-tiered data management system that allows users to interact with heterogeneous databases (MySQL and PostgreSQL) using natural language. It leverages the FastMCP framework for server-side tool orchestration and integrates a Large Language Model (LLM) for intelligent query processing and response generation.
 Table of Contents
 
