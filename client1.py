@@ -1500,29 +1500,77 @@ if application == "MCP Application":
     if st.session_state.visualizations:
         st.markdown("---")
         st.markdown("## 📊 Interactive Visualizations")
-    
+
         for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
-            with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-                # Use Streamlit columns instead of HTML for better layout control
-                col1, col2 = st.columns(2)
-
-                with col1:
+            with st.expander(
+                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
+            
+            # Create tabs with Code first, then Visualization
+                tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
+            
+                with tab1:
                     st.markdown("**Generated Code**")
-                    st.code(viz_code, language = "html")
-
-                    # Adding copy button
-                    if st.button("📋 Copy Code ", key = f"copy_{i}"):
-                        st.session_state.copied_code = viz_code
-                        st.success("Code copied to the clipboard")
-
-                with col2:
-                    st.markdown("**Rendered Visualization**")
-                    # Use a container with fixed height
+                
+                # Initialize streaming state for this visualization if not exists
+                    stream_key = f"stream_complete_{i}"
+                    if stream_key not in st.session_state:
+                        st.session_state[stream_key] = False
+                
+                # Create placeholder for streaming effect
+                    code_placeholder = st.empty()
+                
+                    if not st.session_state[stream_key]:
+                    # Streaming effect - show code character by character
+                        import time
+                    
+                    # Show streaming indicator first
+                        with code_placeholder.container():
+                            st.info("🔄 Generating code...")
+                    
+                    # Small delay to show the loading message
+                        time.sleep(0.5)
+                    
+                    # Stream the code
+                        streamed_code = ""
+                        for j, char in enumerate(viz_code):
+                            streamed_code += char
+                        # Update every 5-10 characters for better performance
+                            if j % 8 == 0 or j == len(viz_code) - 1:
+                                code_placeholder.code(streamed_code, language="html")
+                                time.sleep(0.03)  # Adjust speed as needed
+                    
+                    # Mark streaming as complete
+                        st.session_state[stream_key] = True
+                    
+                    # Force a rerun to show the complete state
+                        st.rerun()
+                    else:
+                    # Show complete code immediately
+                        code_placeholder.code(viz_code, language="html")
+                
+                # Adding copy button (only show when streaming is complete)
+                    if st.session_state[stream_key]:
+                        if st.button("📋 Copy Code", key=f"copy_{i}"):
+                            st.session_state.copied_code = viz_code
+                            st.success("Code copied to clipboard!")
+                        
+                    # Add reset streaming button for demo purposes
+                        if st.button("🔄 Replay Code Generation", key=f"replay_{i}"):
+                            st.session_state[stream_key] = False
+                            st.rerun()
+            
+                with tab2:
+                    st.markdown("**Interactive Visualization**")
+                # Use a container with fixed height
                     with st.container():
-                        components.html(viz_html, height = 400, scrolling = True)
-        
+                        components.html(viz_html, height=400, scrolling=True)
+
         if st.button("🧹 Clear All Visualizations", key="clear_viz"):
             st.session_state.visualizations = []
+        # Clear all streaming states
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
             st.rerun()
 
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
