@@ -602,10 +602,10 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
 
 
 # ========== VISUALIZATION GENERATOR ==========
-def generate_visualization(data: any, user_query: str, tool: str) -> str:
+def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     """
     Generate JavaScript visualization code based on data and query
-    Returns HTML/JS code for the visualization
+    Returns tuple of (HTML/JS code for the visualization, raw code)
     """
     
     # Prepare context for the LLM
@@ -618,17 +618,18 @@ def generate_visualization(data: any, user_query: str, tool: str) -> str:
     
     system_prompt = """
     You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
-    Analyze the data structure and user query to determine the most appropriate visualization.
+    Analyze the data structure and user query to determine the most appropriate visualization. Make it aesthetic and informative.
     
     RULES:
     1. Return ONLY raw HTML and JavaScript code
     2. Use Chart.js for visualizations (include CDN link)
-    3. Make it responsive and visually appealing
+    3. Make it responsive but set fixed height for charts (max 400px)
     4. Include appropriate titles and labels based on the user query
     5. Handle both tabular data and simple results
     6. No markdown, no explanations, just code
-    7. If data is complex, create multiple chart types (bar, line, pie)
-    8. Make sure the visualization fits in a container with proper dimensions
+    7. If data is complex, create multiple chart types (bar, line, pie) but limit to 2-5 charts
+    8. Use container div with fixed height and overflow: auto
+    9. Add 'chart-container' class to all chart containers
     """
     
     user_prompt = f"""
@@ -641,6 +642,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> str:
     
     Generate a comprehensive visualization that helps understand the data.
     Focus on the most important insights from the query.
+    Make sure charts have fixed heights and don't overflow.
     """
     
     try:
@@ -649,12 +651,15 @@ def generate_visualization(data: any, user_query: str, tool: str) -> str:
             HumanMessage(content=user_prompt)
         ]
         response = groq_client.invoke(messages)
-        return response.content.strip()
+        visualization_code = response.content.strip()
+        
+        # Return both the code and the rendered HTML
+        return visualization_code, visualization_code
     except Exception as e:
         # Fallback to a simple table if visualization generation fails
         if isinstance(data, list) and len(data) > 0:
-            return f"""
-            <div class="visualization-container">
+            fallback_code = f"""
+            <div class="visualization-container" style="height: 400px; overflow: auto;">
                 <div class="visualization-title">Data Table</div>
                 <div id="table-container"></div>
             </div>
@@ -683,12 +688,73 @@ def generate_visualization(data: any, user_query: str, tool: str) -> str:
             </script>
             """
         else:
-            return f"""
-            <div class="visualization-container">
+            fallback_code = f"""
+            <div class="visualization-container" style="height: 200px; overflow: auto;">
                 <div class="visualization-title">Result</div>
                 <p>{str(data)}</p>
             </div>
             """
+        return fallback_code, fallback_code
+
+# Add this CSS for the split layout
+st.markdown("""
+    <style>
+    .split-container {
+        display: flex;
+        width: 100%;
+        gap: 20px;
+        margin: 20px 0;
+    }
+    .code-panel {
+        flex: 1;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid #e9ecef;
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    .viz-panel {
+        flex: 1;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid #e9ecef;
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    .code-header, .viz-header {
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .copy-button {
+        background: #4286f4;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.8rem;
+    }
+    .copy-button:hover {
+        background: #397dd2;
+    }
+    .chart-container {
+        height: 350px !important;
+        margin-bottom: 20px;
+    }
+    .visualization-container {
+        height: 400px;
+        overflow: auto;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
@@ -842,7 +908,6 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
 )
-
 
     user_prompt = f"""User query: "{query}"
 
@@ -1435,13 +1500,28 @@ if application == "MCP Application":
     if st.session_state.visualizations:
         st.markdown("---")
         st.markdown("## 📊 Interactive Visualizations")
-        
-        for i, (viz_html, user_query) in enumerate(st.session_state.visualizations):
+    
+        for i, (viz_html, viz_code) in enumerate(st.session_state.visualizations):
             with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-                components.html(viz_html, height=600, scrolling=True)
-                
-        # Clear visualizations button
-        if st.button("🧹 Clear All Visualizations"):
+                # Use Streamlit columns instead of HTML for better layout control
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("**Generated Code**")
+                    st.code(viz_code, language = "html")
+
+                    # Adding copy button
+                    if st.button("📋 Copy Code ", key = f"copy_{i}"):
+                        st.session_state.copied_code = viz_code
+                        st.success("Code copied to the clipboard")
+
+                with col2:
+                    st.markdown("**Rendered Visualization**")
+                    # Use a container with fixed height
+                    with st.container():
+                        components.html(viz_html, height = 400, scrolling = True)
+        
+        if st.button("🧹 Clear All Visualizations", key="clear_viz"):
             st.session_state.visualizations = []
             st.rerun()
 
@@ -1609,8 +1689,14 @@ if application == "MCP Application":
                 (isinstance(viz_data, dict) and len(viz_data) > 0)
             ):
                 with st.spinner("Generating visualization..."):
-                    viz_html = generate_visualization(viz_data, user_query, tool)
-                    st.session_state.visualizations.append((viz_html, user_query))
+                    viz_code, viz_html = generate_visualization(viz_data, user_query, tool)
+
+                # Add to visualization list with both code and HTML
+                if "visualizations" not in st.session_state:
+                    st.session_state.visualizations = []                    
+                st.session_state.visualizations.append((viz_html, viz_code, user_query))
+
+                st.success("Visualization generated successfully!")
             
         except Exception as e:
             reply, fmt = f"⚠️ Error: {e}", "text"
