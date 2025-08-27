@@ -618,7 +618,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     
     system_prompt = """
     You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
-    Analyze the data structure and user query to determine the most appropriate visualization.
+    Analyze the data structure and user query to determine the most appropriate visualization. Make it aesthetic and informative.
     
     RULES:
     1. Return ONLY raw HTML and JavaScript code
@@ -627,7 +627,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     4. Include appropriate titles and labels based on the user query
     5. Handle both tabular data and simple results
     6. No markdown, no explanations, just code
-    7. If data is complex, create multiple chart types (bar, line, pie) but limit to 2-3 charts
+    7. If data is complex, create multiple chart types (bar, line, pie) but limit to 2-5 charts
     8. Use container div with fixed height and overflow: auto
     9. Add 'chart-container' class to all chart containers
     """
