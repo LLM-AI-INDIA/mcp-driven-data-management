@@ -22,7 +22,7 @@ if not GROQ_API_KEY:
 
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
+    model_name=os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 )
 
 # ========== PAGE CONFIG ==========
