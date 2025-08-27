@@ -842,7 +842,7 @@ system_prompt = (
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
 )
-    user_prompt = f"""User query: "{query}"
+user_prompt = f"""User query: "{query}"
 
 Analyze the query step by step:
 
