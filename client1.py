@@ -1501,7 +1501,7 @@ if application == "MCP Application":
         st.markdown("---")
         st.markdown("## 📊 Interactive Visualizations")
     
-        for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
+        for i, (viz_html, viz_code) in enumerate(st.session_state.visualizations):
             with st.expander(f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
                 # Use Streamlit columns instead of HTML for better layout control
                 col1, col2 = st.columns(2)
@@ -1790,5 +1790,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
