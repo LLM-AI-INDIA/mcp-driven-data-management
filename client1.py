@@ -704,7 +704,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     tools_description = "\n".join(tool_info)
 
-    system_prompt = (
+system_prompt = (
     "You are an intelligent database router for CRUD operations. "
     "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
 
@@ -716,7 +716,8 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "- 'create': for adding, inserting, or creating NEW records\n"
     "- 'update': for modifying, changing, or updating existing records\n"
     "- 'delete': for removing, deleting, or destroying records\n"
-    "- 'describe': for showing table structure, schema, or column information\n\n"
+    "- 'describe': for showing table structure, schema, or column information\n"
+    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n\n"
 
     "CRITICAL TOOL SELECTION RULES:\n"
     "\n"
@@ -745,17 +746,33 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - Any query asking for combined data from multiple tables\n"
     "\n"
     "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
-    "   - 'show care plans', 'list case notes', 'display care plans', 'care plan records'\n"
-    "   - 'list care plans with name John', 'care plans mentioning cancer'\n"
-    "   - 'show care plan without address', 'display only name and notes'\n"
-    "   - Any query related to healthcare records with Name, Address, Phone Number, Case Notes\n\n"
+    "   - 'show care plans', 'list patients', 'display care plans', 'patient records'\n"
+    "   - 'list care plans with name John', 'patients with diabetes'\n"
+    "   - 'show care plan details', 'display patient information'\n"
+    "   - 'patients needing housing assistance', 'care plans with employment status'\n"
+    "   - 'reentry care plans', 'general care plans'\n"
+    "   - Any query related to healthcare records, patient information, or care management\n\n"
+
     "5. **CALL LOG ANALYSIS QUERIES** → Use 'calllogs_crud':\n"
     "   - 'analyze call logs', 'show call statistics', 'call center metrics'\n"
     "   - 'agent performance', 'sentiment analysis', 'issue frequency'\n"
-    "   - 'call volume trends', 'escalation analysis'\n"
-    "   - 'show calls by agent [AgentName]'\n"
-    "   - 'calls with negative sentiment'\n"
+    "   - 'call volume trends', 'escalation analysis', 'resolution rates'\n"
+    "   - 'show calls by agent [AgentName]', 'calls with negative sentiment'\n"
+    "   - 'call duration analysis', 'wait time statistics'\n"
+    "   - 'top issue categories', 'service quality metrics'\n"
+    "   - Use 'operation': 'analyze' for analytical reports\n"
+    "   - Use 'operation': 'read' for raw call log data\n"
     "   - Any query related to call logs, agent performance, or customer service metrics\n\n"
+
+    "**ENHANCED CARE PLAN FIELD MAPPING:**\n"
+    "The CarePlan table now includes comprehensive real-world fields:\n"
+    "- Base: 'actual_release_date', 'name_of_youth', 'race_ethnicity', 'medi_cal_id_number'\n"
+    "- Health: 'health_screenings', 'health_assessments', 'chronic_conditions', 'prescribed_medications'\n"
+    "- Reentry: 'housing', 'employment', 'income_benefits', 'transportation', 'life_skills'\n"
+    "- Clinical: 'screenings', 'clinical_assessments', 'treatment_history', 'scheduled_appointments'\n"
+    "- Support: 'family_children', 'emergency_contacts', 'service_referrals', 'court_dates'\n"
+    "- Equipment: 'home_modifications', 'durable_medical_equipment'\n"
+    "- Metadata: 'care_plan_type', 'status', 'notes'\n\n"
 
     "**ETL & DISPLAY FORMATTING RULES:**\n"
     "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
@@ -786,30 +803,45 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
 
     "5. **CARE PLAN COLUMN FILTERING:**\n"
-    "   - If the user asks to 'show only name and notes', 'remove address', or 'exclude phone number'.\n"
+    "   - If the user asks to 'show only name and chronic conditions', 'remove address', or 'exclude phone'.\n"
     "   - Use: `columns` field in args with positive or negative column names.\n"
-    "   - **Example Query:** 'show only name and case notes from care plans'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name,case_notes\"}}\n"
-    "   - **Example Query:** 'show care plans without phone number and address'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"*,-phone_number,-address\"}}\n"
+    "   - **Example Query:** 'show only name and chronic conditions from care plans'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name_of_youth,chronic_conditions\"}}\n"
+    "   - **Example Query:** 'show care plans without address and phone'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"*,-residential_address,-telephone\"}}\n"
 
     "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
-    "   - If user asks 'care plans mentioning cancer in notes', use LIKE\n"
-    "   - Use: {\"where_clause\": \"case_notes LIKE '%cancer%'\"}\n"
-    "   - **Example Query:** 'list care plans mentioning cancer'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"case_notes LIKE '%cancer%'\"}}\n"
+    "   - If user asks 'care plans mentioning diabetes in chronic conditions', use LIKE\n"
+    "   - Use: {\"where_clause\": \"chronic_conditions LIKE '%diabetes%'\"}\n"
+    "   - **Example Query:** 'list patients with diabetes'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"chronic_conditions LIKE '%diabetes%'\"}}\n"
     "   - **Example Query:** 'care plans where name is John'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name = 'John'\"}}\n"
-    "   - **Example Query:** 'show care plans for address New York'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"address LIKE '%New York%'\"}}\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name_of_youth = 'John'\"}}\n"
+    "   - **Example Query:** 'show patients needing housing assistance'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"housing LIKE '%assistance%' OR housing = 'Homeless'\"}}\n"
 
-    "7. **CARE PLAN COLUMN NAME MAPPING:**\n"
-    "   - 'name' → 'Name'\n"
-    "   - 'address' → 'Address'\n"
-    "   - 'phone number', 'phone' → 'PhoneNumber'\n"
-    "   - 'case notes', 'notes' → 'CaseNotes'\n"
+    "7. **CARE PLAN TYPE FILTERING:**\n"
+    "   - If user asks for 'reentry care plans' or 'general care plans'\n"
+    "   - Use: {\"care_plan_type\": \"Reentry Care Plan\"} or {\"care_plan_type\": \"General Care Plan\"}\n"
+    "   - **Example Query:** 'show reentry care plans'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"care_plan_type\": \"Reentry Care Plan\"}}\n"
+
+    "8. **CALL LOGS ANALYSIS TYPES:**\n"
+    "   - sentiment_by_agent: Agent sentiment performance\n"
+    "   - issue_frequency: Most common issues\n"
+    "   - call_volume_trends: Daily call trends\n"
+    "   - escalation_analysis: Escalation rates by issue\n"
+    "   - agent_performance: Comprehensive agent metrics\n"
+    "   - **Example Query:** 'analyze agent performance'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"agent_performance\"}}\n"
+
+    "9. **CALL LOGS FILTERING:**\n"
+    "   - Use 'agent_name', 'issue_category', 'sentiment_threshold' for filtering\n"
+    "   - **Example Query:** 'show calls with negative sentiment'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
+    "   - **Example Query:** 'calls handled by Sarah Chen'\n"
+    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
 )
-
     user_prompt = f"""User query: "{query}"
 
 Analyze the query step by step:
@@ -1670,5 +1702,6 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
