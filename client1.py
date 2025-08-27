@@ -704,7 +704,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     tools_description = "\n".join(tool_info)
 
-system_prompt = (
+    system_prompt = (
     "You are an intelligent database router for CRUD operations. "
     "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
 
@@ -842,7 +842,7 @@ system_prompt = (
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
 )
-user_prompt = f"""User query: "{query}"
+    user_prompt = f"""User query: "{query}"
 
 Analyze the query step by step:
 
@@ -1702,6 +1702,7 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
+
 
 
 
