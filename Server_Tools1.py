@@ -2,7 +2,8 @@ import os
 import pyodbc
 import psycopg2
 from typing import Any, Optional
-
+import random
+from datetime import datetime, timedelta
 # MCP server
 from fastmcp import FastMCP
 import mysql.connector
@@ -108,11 +109,13 @@ def seed_databases():
     sql_cur.execute("DROP TABLE IF EXISTS Sales;")
     sql_cur.execute("DROP TABLE IF EXISTS ProductsCache;")
     sql_cur.execute("DROP TABLE IF EXISTS Customers;")
+    sql_cur.execute("DROP TABLE IF EXISTS CarePlan;")
+    sql_cur.execute("DROP TABLE IF EXISTS CallLogs;")
 
     # Re-enable foreign key checks
     sql_cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
 
-    # Create Customers table with FirstName and LastName
+    ##### Create Customers table with FirstName and LastName
     sql_cur.execute("""
                     CREATE TABLE Customers
                     (
@@ -152,7 +155,7 @@ def seed_databases():
          (3, "Tool", 24.99, None)]  # Tool has no description for null handling demo
     )
 
-    # Create Sales table in MySQL with foreign key constraints
+    ##### Create Sales table in MySQL with foreign key constraints
     sql_cur.execute("""
                     CREATE TABLE Sales
                     (
@@ -177,31 +180,279 @@ def seed_databases():
     )
 
 
-    # Create CarePlan table in MySQL
+    ##### Create CarePlan table in MySQL
     sql_cur.execute("""
-    CREATE TABLE IF NOT EXISTS CarePlan
-        (
-            ID INT AUTO_INCREMENT PRIMARY KEY,
-            Name VARCHAR(100),
-            Address VARCHAR(255),
-            PhoneNumber VARCHAR(20),
-            CaseNotes TEXT
-        );
-        """)
+    CREATE TABLE IF NOT EXISTS CarePlan (
+        ID INT AUTO_INCREMENT PRIMARY KEY,
+        -- Base Information
+        ActualReleaseDate DATE,
+        NameOfYouth VARCHAR(255),
+        RaceEthnicity VARCHAR(100),
+        MediCalIDNumber VARCHAR(50),
+        ResidentialAddress TEXT,
+        Telephone VARCHAR(20),
+        MediCalHealthPlan VARCHAR(100),
 
-    sql_cur.executemany(
-    "INSERT INTO CarePlan (Name, Address, PhoneNumber, CaseNotes) VALUES (%s, %s, %s, %s)",
-        [('John Carter', '123 Maple St, Denver, CO', '720-555-1034', 'Patient shows signs of early-onset arthritis.'),
-        ('Emily Wong', '452 Elm Ave, Austin, TX', '512-555-9472', 'Monitoring post-op recovery from appendectomy.'),
-        ('Michael Thompson', '789 Pine Blvd, Seattle, WA', '206-555-7812', 'Referred to oncology for suspected lymphoma.'),
-        ('Sarah Patel', '901 Sunset Dr, Phoenix, AZ', '602-555-2298', 'Chronic asthma, advised to avoid dust exposure.'),
-        ('David Nguyen', '134 Liberty Ln, Chicago, IL', '312-555-4431', 'Blood pressure stabilized, no meds required.'),
-        ('Angela Rodriguez', '555 Oak Cir, Miami, FL', '305-555-9902', 'Case closed after successful cataract surgery.'),
-        ('Brian Lee', '778 Birch Rd, Boston, MA', '617-555-6711', 'Follow-up pending for insulin regulation.'),
-        ('Rachel Kim', '333 Main St, San Francisco, CA', '415-555-8884', 'Recovering from minor stroke, speech therapy advised.'),
-        ('Thomas Green', '2290 Riverwalk Dr, Nashville, TN', '615-555-1200', 'Persistent migraines; neurologist appointment scheduled.'),
-        ('Olivia Martinez', '101 Westview Blvd, Orlando, FL', '407-555-6559', 'Patient enrolled in smoking cessation program.')]
-    )
+        -- Health Information
+        HealthScreenings TEXT,
+        HealthAssessments TEXT,
+        ChronicConditions TEXT,
+        PrescribedMedications TEXT,
+
+        -- Reentry Specific Fields
+        Screenings TEXT,
+        ClinicalAssessments TEXT,
+        TreatmentHistory TEXT,
+        PrimaryPhysicianContacts TEXT,
+        ScheduledAppointments TEXT,
+        Housing TEXT,
+        Employment TEXT,
+        IncomeBenefits TEXT,
+        FoodClothing TEXT,
+        Transportation TEXT,
+        IdentificationDocuments TEXT,
+        LifeSkills TEXT,
+        FamilyChildren TEXT,
+        EmergencyContacts TEXT,
+        CourtDates TEXT,
+        ServiceReferrals TEXT,
+        HomeModifications TEXT,
+        DurableMedicalEquipment TEXT,
+
+        -- Metadata
+        CarePlanType VARCHAR(50) DEFAULT 'General',
+        CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        Status VARCHAR(50) DEFAULT 'Active',
+        Notes TEXT
+    );
+    """)
+
+    # Sample data for 100 patients with realistic information
+    care_plan_data = []
+
+    # Common data for realistic patient profiles
+    first_names = ['James', 'Maria', 'David', 'Sarah', 'Michael', 'Jessica', 'Christopher', 'Ashley',
+                  'Matthew', 'Amanda', 'Joshua', 'Jennifer', 'Daniel', 'Elizabeth', 'Andrew', 'Michelle',
+                  'Anthony', 'Emily', 'Robert', 'Nicole', 'William', 'Samantha', 'Joseph', 'Stephanie',
+                  'Thomas', 'Rebecca', 'Charles', 'Laura', 'John', 'Kimberly', 'Ryan', 'Amy', 'Nicholas',
+                  'Angela', 'Kevin', 'Crystal', 'Brian', 'Heather', 'Jason', 'Melissa', 'Eric', 'Tiffany',
+                  'Adam', 'Christina', 'Jonathan', 'Rachel', 'Justin', 'Kelly', 'Timothy', 'Lisa']
+
+    last_names = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez',
+                 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor',
+                 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White', 'Harris', 'Sanchez',
+                 'Clark', 'Ramirez', 'Lewis', 'Robinson', 'Walker', 'Young', 'Allen', 'King', 'Wright',
+                 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores', 'Green', 'Adams', 'Nelson', 'Baker', 'Hall',
+                 'Rivera', 'Campbell', 'Mitchell', 'Carter', 'Roberts']
+
+    races = ['Caucasian', 'African American', 'Hispanic/Latino', 'Asian', 'Native American',
+            'Pacific Islander', 'Multiracial', 'Other']
+
+    health_plans = ['Anthem Blue Cross', 'Kaiser Permanente', 'Health Net', 'Blue Shield of California',
+                   'Molina Healthcare', 'LA Care Health Plan', 'Community Health Group', 'Inland Empire Health Plan']
+
+    chronic_conditions = ['Asthma', 'Diabetes', 'Hypertension', 'Depression', 'Anxiety', 'ADHD',
+                         'Bipolar Disorder', 'PTSD', 'Substance Use Disorder', 'HIV/AIDS', 'Hepatitis C',
+                         'Epilepsy', 'Arthritis', 'Heart Disease', 'COPD']
+
+    medications = ['Metformin', 'Lisinopril', 'Albuterol', 'Sertraline', 'Escitalopram', 'Bupropion',
+                  'Risperidone', 'Aripiprazole', 'Quetiapine', 'Lamotrigine', 'Valproic Acid', 'Insulin',
+                  'Amlodipine', 'Atorvastatin', 'Metoprolol', 'Gabapentin', 'Trazodone', 'Clonazepam']
+
+    housing_options = ['Stable Housing', 'Transitional Housing', 'Homeless', 'Shelter', 'Living with Family',
+                      'Group Home', 'Independent Living', 'Supportive Housing']
+
+    employment_status = ['Employed Full-time', 'Employed Part-time', 'Unemployed', 'Student', 'Disabled',
+                        'Vocational Training', 'Seeking Employment', 'Volunteer']
+
+    # Generate 100 realistic patient records
+    for i in range(100):
+        first_name = random.choice(first_names)
+        last_name = random.choice(last_names)
+        full_name = f"{first_name} {last_name}"
+
+        # Generate realistic data for each field
+        care_plan_data.append((
+            # ActualReleaseDate (within last 2 years)
+            datetime.now().date() - timedelta(days=random.randint(0, 730)),
+            full_name,
+            random.choice(races),
+            f"MC{random.randint(1000000, 9999999)}",  # MediCal ID
+            f"{random.randint(100, 9999)} {random.choice(['Main', 'Oak', 'Maple', 'Pine'])} St, "
+            f"{random.choice(['Los Angeles', 'San Diego', 'San Francisco', 'Sacramento', 'Oakland', 'Fresno'])} CA",
+            f"{random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}",
+            random.choice(health_plans),
+
+            # HealthScreenings
+            f"Last screening: {random.choice(['2023', '2024'])}; "
+            f"Results: {random.choice(['Normal', 'Abnormal - follow up needed', 'Pending'])}",
+
+            # HealthAssessments
+            f"Comprehensive assessment completed; Risk level: {random.choice(['Low', 'Medium', 'High'])}",
+
+            # ChronicConditions (1-3 conditions)
+            ", ".join(random.sample(chronic_conditions, random.randint(1, 3))),
+
+            # PrescribedMedications (1-4 medications)
+            ", ".join(random.sample(medications, random.randint(1, 4))),
+
+            # Screenings
+            f"Mental health: {random.choice(['Completed', 'Pending'])}; "
+            f"Substance use: {random.choice(['Completed', 'Pending'])}; "
+            f"Physical health: {random.choice(['Completed', 'Pending'])}",
+
+            # ClinicalAssessments
+            f"PHQ-9: {random.randint(0, 27)}; GAD-7: {random.randint(0, 21)}; "
+            f"SUD assessment: {random.choice(['Positive', 'Negative', 'Inconclusive'])}",
+
+            # TreatmentHistory
+            f"Previous treatment: {random.choice(['Outpatient', 'Inpatient', 'Residential', 'None'])}; "
+            f"Duration: {random.randint(1, 24)} months",
+
+            # PrimaryPhysicianContacts
+            f"Dr. {random.choice(['Brown', 'Wilson', 'Chen', 'Garcia', 'Patel'])}; "
+            f"Phone: {random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}",
+
+            # ScheduledAppointments
+            f"Next appointment: {(datetime.now() + timedelta(days=random.randint(1, 30))).strftime('%Y-%m-%d')}; "
+            f"Type: {random.choice(['Therapy', 'Medical', 'Psychiatric', 'Case Management'])}",
+
+            # Housing
+            random.choice(housing_options),
+
+            # Employment
+            random.choice(employment_status),
+
+            # IncomeBenefits
+            f"Income: ${random.randint(500, 3000)}/month; "
+            f"Benefits: {random.choice(['Medi-Cal', 'SSI', 'SSDI', 'CalFresh', 'None'])}",
+
+            # FoodClothing
+            f"Food security: {random.choice(['Secure', 'Insecure'])}; "
+            f"Clothing needs: {random.choice(['Adequate', 'Needs assistance'])}",
+
+            # Transportation
+            random.choice(['Public transit', 'Personal vehicle', 'Rideshare', 'Walking', 'Bicycle']),
+
+            # IdentificationDocuments
+            f"ID status: {random.choice(['Has all documents', 'Missing some', 'No documents'])}; "
+            f"Needs: {random.choice(['State ID', 'Birth certificate', 'Social Security card', 'None'])}",
+
+            # LifeSkills
+            f"Skills assessment: {random.choice(['Basic skills present', 'Needs training', 'Advanced skills'])}; "
+            f"Focus areas: {random.choice(['Budgeting', 'Cooking', 'Job search', 'Communication'])}",
+
+            # FamilyChildren
+            f"Family support: {random.choice(['Strong', 'Moderate', 'Limited', 'None'])}; "
+            f"Dependents: {random.randint(0, 4)} children",
+
+            # EmergencyContacts
+            f"Contact: {random.choice(['Parent', 'Sibling', 'Friend', 'Case worker'])} "
+            f"{random.choice(first_names)} {random.choice(last_names)}; "
+            f"Phone: {random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}",
+
+            # CourtDates
+            f"Next court date: {(datetime.now() + timedelta(days=random.randint(7, 90))).strftime('%Y-%m-%d')}; "
+            f"Type: {random.choice(['Progress review', 'Hearing', 'Sentencing', 'Probation'])}",
+
+            # ServiceReferrals
+            f"Referrals: {random.choice(['Mental health', 'Substance abuse', 'Vocational', 'Educational', 'Housing'])}; "
+            f"Status: {random.choice(['Pending', 'Completed', 'In progress'])}",
+
+            # HomeModifications
+            random.choice(['None needed', 'Ramp installation', 'Grab bars', 'Widened doorways', 'Accessible bathroom']),
+
+            # DurableMedicalEquipment
+            random.choice(['None', 'Wheelchair', 'Walker', 'Oxygen tank', 'CPAP machine', 'Prosthetics']),
+
+            # CarePlanType - 60% Reentry, 40% General
+            random.choices(['Reentry Care Plan', 'General Care Plan'], weights=[60, 40])[0],
+
+            # Status
+            random.choice(['Active', 'Completed', 'On hold', 'Transferred']),
+
+            # Notes
+            f"Patient demonstrates {random.choice(['good', 'fair', 'poor'])} progress. "
+            f"Key challenges: {random.choice(['housing stability', 'employment', 'mental health', 'substance use', 'family reunification'])}. "
+            f"Strengths: {random.choice(['motivation', 'family support', 'work ethic', 'resilience', 'communication skills'])}."
+        ))
+
+    # Insert the sample care plan data
+    sql_cur.executemany("""
+        INSERT INTO CarePlan (ActualReleaseDate, NameOfYouth, RaceEthnicity, MediCalIDNumber, ResidentialAddress, Telephone,
+            MediCalHealthPlan, HealthScreenings, HealthAssessments, ChronicConditions, PrescribedMedications,
+            Screenings, ClinicalAssessments, TreatmentHistory, PrimaryPhysicianContacts, ScheduledAppointments,
+            Housing, Employment, IncomeBenefits, FoodClothing, Transportation, IdentificationDocuments,
+            LifeSkills, FamilyChildren, EmergencyContacts, CourtDates, ServiceReferrals, HomeModifications,
+            DurableMedicalEquipment, CarePlanType, Status, Notes
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+    """, care_plan_data)
+
+
+    ##### Creating the CallLogs Table
+    sql_cur.execute("""
+        CREATE TABLE IF NOT EXISTS CallLogs (
+            LogID INT AUTO_INCREMENT PRIMARY KEY,
+            CallDate DATETIME NOT NULL,
+            CustomerID INT,
+            AgentName VARCHAR(100),
+            CallDuration INT, -- in seconds
+            CallType VARCHAR(50), -- inbound/outbound/transfer
+            CallStatus VARCHAR(50), -- completed/dropped/voicemail
+            IssueCategory VARCHAR(100),
+            ResolutionStatus VARCHAR(50), -- resolved/escalated/pending
+            SentimentScore DECIMAL(3,2), -- -1.00 to 1.00
+            CallNotes TEXT,
+            WaitTime INT, -- in seconds
+            TransferCount INT DEFAULT 0,
+            FOREIGN KEY (CustomerID) REFERENCES Customers(Id) ON DELETE SET NULL,
+            INDEX idx_call_date (CallDate),
+            INDEX idx_customer (CustomerID),
+            INDEX idx_category (IssueCategory)
+        );
+    """)
+
+    call_log_data = []
+    agents = ['Sarah Chen', 'Mike Johnson', 'Emily Davis', 'James Wilson', 'Lisa Anderson', 'David Martinez', 'Jennifer Brown', 'Robert Taylor']
+    call_types = ['inbound', 'outbound', 'transfer']
+    call_statuses = ['completed', 'dropped', 'voicemail']
+    issue_categories = ['billing', 'technical', 'product_inquiry', 'complaint', 'order_status', 'account', 'refund', 'general']
+    resolution_statuses = ['resolved', 'escalated', 'pending', 'follow_up']
+
+    base_date = datetime.now() - timedelta(days=90)
+
+    for i in range(300):
+        call_date = base_date + timedelta(
+            days=random.randint(0, 89),
+            hours=random.randint(8, 20),
+            minutes=random.randint(0, 59)
+        )
+
+        call_log_data.append((
+            call_date,
+            random.randint(1, 3),  # CustomerID (1-3 from existing customers)
+            random.choice(agents),
+            random.randint(30, 1800),  # CallDuration (30 sec to 30 min)
+            random.choice(call_types),
+            random.choice(call_statuses),
+            random.choice(issue_categories),
+            random.choice(resolution_statuses),
+            round(random.uniform(-0.5, 1.0), 2),  # SentimentScore
+            f"Customer called regarding {random.choice(issue_categories)} issue. {random.choice(['Issue resolved successfully.', 'Escalated to supervisor.', 'Follow-up required.', 'Customer satisfied with resolution.'])}",
+            random.randint(0, 300),  # WaitTime (0-5 minutes)
+            random.randint(0, 3)  # TransferCount
+        ))
+
+    sql_cur.executemany("""
+        INSERT INTO CallLogs (CallDate, CustomerID, AgentName, CallDuration, CallType,
+                             CallStatus, IssueCategory, ResolutionStatus, SentimentScore,
+                             CallNotes, WaitTime, TransferCount)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, call_log_data)
+
     sql_cnx.close()
 
     # ---------- PostgreSQL (Products) ----------
@@ -210,6 +461,8 @@ def seed_databases():
     pg_cur = pg_cnxn.cursor()
 
     pg_cur.execute("DROP TABLE IF EXISTS products CASCADE;")
+
+    ##### Create table for Products in Postgres
     pg_cur.execute("""
                    CREATE TABLE products
                    (
@@ -269,7 +522,7 @@ def get_customer_id_by_name(name: str) -> Optional[int]:
     return result[0] if result else None
 
 def get_product_id_by_name(name: str) -> Optional[int]:
-    conn = get_pg_products_conn()
+    conn = get_pg_conn()
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM Products WHERE name = %s", (name,))
     result = cursor.fetchone()
@@ -1269,15 +1522,17 @@ async def sales_crud(
     else:
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
-# ----------------
-# 10. CarePlan Tool
-# ----------------
+# ————————————————
+# 10. Enhanced CarePlan Tool with Comprehensive Fields
+# ————————————————
 @mcp.tool()
 async def careplan_crud(
         operation: str,
         columns: str = None,
         where_clause: str = None,
-        limit: int = None
+        limit: int = None,
+        care_plan_type: str = None,
+        status: str = None
 ) -> Any:
     if operation != "read":
         return {"sql": None, "result": "❌ Only 'read' operation is supported for care plans."}
@@ -1285,13 +1540,50 @@ async def careplan_crud(
     conn = get_mysql_conn()
     cur = conn.cursor()
 
-    # Mapping for clean column naming
+    # Mapping for clean column naming with all the new comprehensive fields
     available_columns = {
-        "id": "Id",
-        "name": "Name",
-        "address": "Address",
-        "phone_number": "PhoneNumber",
-        "case_notes": "CaseNotes"
+        # Base Information
+        "id": "ID",
+        "actual_release_date": "ActualReleaseDate",
+        "name_of_youth": "NameOfYouth",
+        "race_ethnicity": "RaceEthnicity",
+        "medi_cal_id_number": "MediCalIDNumber",
+        "residential_address": "ResidentialAddress",
+        "telephone": "Telephone",
+        "medi_cal_health_plan": "MediCalHealthPlan",
+
+        # Health Information
+        "health_screenings": "HealthScreenings",
+        "health_assessments": "HealthAssessments",
+        "chronic_conditions": "ChronicConditions",
+        "prescribed_medications": "PrescribedMedications",
+
+        # Reentry Specific Fields
+        "screenings": "Screenings",
+        "clinical_assessments": "ClinicalAssessments",
+        "treatment_history": "TreatmentHistory",
+        "primary_physician_contacts": "PrimaryPhysicianContacts",
+        "scheduled_appointments": "ScheduledAppointments",
+        "housing": "Housing",
+        "employment": "Employment",
+        "income_benefits": "IncomeBenefits",
+        "food_clothing": "FoodClothing",
+        "transportation": "Transportation",
+        "identification_documents": "IdentificationDocuments",
+        "life_skills": "LifeSkills",
+        "family_children": "FamilyChildren",
+        "emergency_contacts": "EmergencyContacts",
+        "court_dates": "CourtDates",
+        "service_referrals": "ServiceReferrals",
+        "home_modifications": "HomeModifications",
+        "durable_medical_equipment": "DurableMedicalEquipment",
+
+        # Metadata
+        "care_plan_type": "CarePlanType",
+        "created_at": "CreatedAt",
+        "updated_at": "UpdatedAt",
+        "status": "Status",
+        "notes": "Notes"
     }
 
     selected_columns = []
@@ -1317,17 +1609,41 @@ async def careplan_crud(
                 if col in available_columns:
                     selected_columns.append(available_columns[col])
                     column_aliases.append(col)
+                else:
+                    # Try fuzzy matching for common variations
+                    for avail_col, db_col in available_columns.items():
+                        if (col in avail_col or avail_col in col or
+                            col.replace("_", "") in avail_col.replace("_", "") or
+                            avail_col.replace("_", "") in col.replace("_", "")):
+                            selected_columns.append(db_col)
+                            column_aliases.append(avail_col)
+                            break
     else:
-        # Default to all columns
-        selected_columns = list(available_columns.values())
-        column_aliases = list(available_columns.keys())
+        # Default to key columns
+        selected_columns = [
+            "ID", "NameOfYouth", "RaceEthnicity", "CarePlanType", "Status",
+            "ChronicConditions", "Housing", "Employment"
+        ]
+        column_aliases = [
+            "id", "name_of_youth", "race_ethnicity", "care_plan_type", "status",
+            "chronic_conditions", "housing", "employment"
+        ]
 
     select_clause = ", ".join([f"{db_col} AS {alias}" for db_col, alias in zip(selected_columns, column_aliases)])
-    sql = f"SELECT {select_clause} FROM CarePlan"
-
+    sql = f"SELECT {select_clause} FROM CarePlan WHERE 1=1"
     query_params = []
+
+    # Add filters
+    if care_plan_type:
+        sql += " AND CarePlanType = %s"
+        query_params.append(care_plan_type)
+
+    if status:
+        sql += " AND Status = %s"
+        query_params.append(status)
+
     if where_clause and where_clause.strip():
-        sql += f" WHERE {where_clause}"
+        sql += f" AND {where_clause}"
 
     if limit:
         sql += f" LIMIT {limit}"
@@ -1340,9 +1656,260 @@ async def careplan_crud(
         return {"sql": sql, "result": f"❌ SQL Error: {str(e)}"}
 
     conn.close()
-    results = [dict(zip(column_aliases, row)) for row in rows]
+
+    # Process results with proper type handling
+    results = []
+    for row in rows:
+        row_dict = {}
+        for i, alias in enumerate(column_aliases):
+            if i < len(row):
+                value = row[i]
+                # Handle date serialization
+                if alias in ["actual_release_date", "created_at", "updated_at"] and value:
+                    value = value.isoformat()
+                row_dict[alias] = value
+        results.append(row_dict)
+
     return {"sql": sql, "result": results}
 
+
+
+# -----------------------
+# CallLogs CRUD TOOL
+# -----------------------
+@mcp.tool()
+async def calllogs_crud(
+        operation: str,
+        analysis_type: str = None,
+        date_range: str = None,
+        agent_name: str = None,
+        issue_category: str = None,
+        sentiment_threshold: float = None,
+        columns: str = None,  # ADD THIS PARAMETER
+        where_clause: str = None,  # ADD THIS FOR FILTERING
+        limit: int = 50
+) -> Any:
+    """Analyzes call log data for customer service insights. Supports various analysis types including sentiment analysis, agent performance, issue trends, and call patterns."""
+
+    conn = get_mysql_conn()
+    cur = conn.cursor()
+
+    if operation == "read":
+        # Define available columns for call logs
+        available_columns = {
+            "log_id": "cl.LogID",
+            "call_date": "cl.CallDate",
+            "customer_id": "cl.CustomerID",
+            "customer_name": "c.Name",
+            "agent_name": "cl.AgentName",
+            "call_duration": "cl.CallDuration",
+            "call_type": "cl.CallType",
+            "call_status": "cl.CallStatus",
+            "issue_category": "cl.IssueCategory",
+            "resolution_status": "cl.ResolutionStatus",
+            "sentiment_score": "cl.SentimentScore",
+            "call_notes": "cl.CallNotes",
+            "wait_time": "cl.WaitTime",
+            "transfer_count": "cl.TransferCount"
+        }
+
+        # Process column selection
+        selected_columns = []
+        column_aliases = []
+
+        if columns and columns.strip():
+            columns_clean = columns.strip().lower()
+
+            if columns_clean.startswith("*"):
+                # Select all columns
+                selected_columns = list(available_columns.values())
+                column_aliases = list(available_columns.keys())
+
+                # Handle exclusions like *,-call_notes
+                exclusions = [col.strip().replace("-", "").replace(" ", "_").lower()
+                            for col in columns_clean.split(",") if col.startswith("-")]
+
+                if exclusions:
+                    filtered = [(alias, col) for alias, col in available_columns.items()
+                               if alias not in exclusions]
+                    if filtered:
+                        column_aliases, selected_columns = zip(*filtered)
+                        column_aliases = list(column_aliases)
+                        selected_columns = list(selected_columns)
+            else:
+                # Process specific columns
+                requested_cols = [col.strip().lower().replace(" ", "_")
+                                for col in columns_clean.split(",") if col.strip()]
+
+                for col in requested_cols:
+                    if col in available_columns:
+                        selected_columns.append(available_columns[col])
+                        column_aliases.append(col)
+                    else:
+                        # Try fuzzy matching
+                        for avail_col, db_col in available_columns.items():
+                            if (col in avail_col or avail_col in col or
+                                col.replace("_", "") in avail_col.replace("_", "")):
+                                selected_columns.append(db_col)
+                                column_aliases.append(avail_col)
+                                break
+
+        # Default columns if none specified
+        if not selected_columns:
+            selected_columns = [
+                "cl.LogID", "cl.CallDate", "c.Name", "cl.AgentName",
+                "cl.CallDuration", "cl.CallType", "cl.IssueCategory",
+                "cl.ResolutionStatus", "cl.SentimentScore"
+            ]
+            column_aliases = [
+                "log_id", "call_date", "customer_name", "agent_name",
+                "call_duration", "call_type", "issue_category",
+                "resolution_status", "sentiment_score"
+            ]
+
+        # Build SELECT clause
+        select_clause = ", ".join([f"{col} AS {alias}"
+                                  for col, alias in zip(selected_columns, column_aliases)])
+
+        sql = f"""
+            SELECT {select_clause}
+            FROM CallLogs cl
+            LEFT JOIN Customers c ON cl.CustomerID = c.Id
+            WHERE 1=1
+        """
+        params = []
+
+        # Add filter conditions
+        if agent_name:
+            sql += " AND cl.AgentName = %s"
+            params.append(agent_name)
+
+        if issue_category:
+            sql += " AND cl.IssueCategory = %s"
+            params.append(issue_category)
+
+        if sentiment_threshold is not None:
+            sql += " AND cl.SentimentScore >= %s"
+            params.append(sentiment_threshold)
+
+        # Add custom WHERE clause if provided
+        if where_clause and where_clause.strip():
+            sql += f" AND {where_clause}"
+
+        sql += " ORDER BY cl.CallDate DESC LIMIT %s"
+        params.append(limit)
+
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+
+        result = []
+        for r in rows:
+            row_dict = {}
+            for i, alias in enumerate(column_aliases):
+                if i < len(r):
+                    value = r[i]
+                    # Handle datetime serialization
+                    if alias == "call_date" and value:
+                        value = value.isoformat()
+                    # Handle decimal serialization
+                    elif alias == "sentiment_score" and value is not None:
+                        value = float(value)
+                    row_dict[alias] = value
+            result.append(row_dict)
+
+        conn.close()
+        return {"sql": sql, "result": result}
+
+    elif operation == "analyze":
+        # Keep all the existing analysis types exactly as they were
+        if analysis_type == "sentiment_by_agent":
+            sql = """
+                SELECT AgentName,
+                       AVG(SentimentScore) as AvgSentiment,
+                       COUNT(*) as TotalCalls,
+                       SUM(CASE WHEN SentimentScore >= 0.5 THEN 1 ELSE 0 END) as PositiveCalls
+                FROM CallLogs
+                GROUP BY AgentName
+                ORDER BY AvgSentiment DESC
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            result = [{"AgentName": r[0], "AvgSentiment": float(r[1]),
+                      "TotalCalls": r[2], "PositiveCalls": r[3]} for r in rows]
+
+        elif analysis_type == "issue_frequency":
+            sql = """
+                SELECT IssueCategory,
+                       COUNT(*) as Frequency,
+                       AVG(CallDuration) as AvgDuration,
+                       SUM(CASE WHEN ResolutionStatus = 'resolved' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as ResolutionRate
+                FROM CallLogs
+                GROUP BY IssueCategory
+                ORDER BY Frequency DESC
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            result = [{"IssueCategory": r[0], "Frequency": r[1],
+                      "AvgDuration": r[2], "ResolutionRate": float(r[3])} for r in rows]
+
+        elif analysis_type == "call_volume_trends":
+            sql = """
+                SELECT DATE(CallDate) as Date,
+                       COUNT(*) as CallCount,
+                       AVG(WaitTime) as AvgWaitTime,
+                       AVG(CallDuration) as AvgDuration
+                FROM CallLogs
+                GROUP BY DATE(CallDate)
+                ORDER BY Date DESC
+                LIMIT 30
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            result = [{"Date": r[0].isoformat(), "CallCount": r[1],
+                      "AvgWaitTime": r[2], "AvgDuration": r[3]} for r in rows]
+
+        elif analysis_type == "escalation_analysis":
+            sql = """
+                SELECT IssueCategory,
+                       COUNT(*) as TotalCalls,
+                       SUM(CASE WHEN ResolutionStatus = 'escalated' THEN 1 ELSE 0 END) as EscalatedCalls,
+                       SUM(CASE WHEN ResolutionStatus = 'escalated' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as EscalationRate
+                FROM CallLogs
+                GROUP BY IssueCategory
+                HAVING EscalationRate > 0
+                ORDER BY EscalationRate DESC
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            result = [{"IssueCategory": r[0], "TotalCalls": r[1],
+                      "EscalatedCalls": r[2], "EscalationRate": float(r[3])} for r in rows]
+
+        elif analysis_type == "agent_performance":
+            sql = """
+                SELECT AgentName,
+                       COUNT(*) as TotalCalls,
+                       AVG(CallDuration) as AvgCallDuration,
+                       AVG(SentimentScore) as AvgSentiment,
+                       SUM(CASE WHEN ResolutionStatus = 'resolved' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as ResolutionRate,
+                       AVG(TransferCount) as AvgTransfers
+                FROM CallLogs
+                GROUP BY AgentName
+                ORDER BY ResolutionRate DESC
+            """
+            cur.execute(sql)
+            rows = cur.fetchall()
+            result = [{"AgentName": r[0], "TotalCalls": r[1],
+                      "AvgCallDuration": r[2], "AvgSentiment": float(r[3]),
+                      "ResolutionRate": float(r[4]), "AvgTransfers": float(r[5])} for r in rows]
+        else:
+            result = "Unknown analysis type. Available types: sentiment_by_agent, issue_frequency, call_volume_trends, escalation_analysis, agent_performance"
+
+        conn.close()
+        return {"sql": sql if analysis_type != None else None, "result": result}
+
+    else:
+        conn.close()
+        return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
 
 # ————————————————
