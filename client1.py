@@ -608,51 +608,41 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     Returns tuple of (HTML/JS code for the visualization, raw code)
     """
     
-    if isinstance(data, dict) and "result" in data:
-        actual_data = data["result"]
-    else:
-        actual_data = data
-    
-    # Prepare accurate context for the LLM
+    # Prepare context for the LLM
     context = {
         "user_query": user_query,
         "tool": tool,
-        "data_type": type(actual_data).__name__,
-        "data_length": len(actual_data) if isinstance(actual_data, list) else 1,
-        "accurate_data_available": True
+        "data_type": type(data).__name__,
+        "data_sample": data[:5] if isinstance(data, list) and len(data) > 0 else data
     }
-
-    if isinstance(actual_data, list) and len(actual_data) > 0:
-        context["data_sample"] = actual_data[:3]  # Just a sample, not for calculations
-    else:
-        context["data_sample"] = actual_data
     
     system_prompt = """
     You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
-    IMPORTANT: Use the actual data statistics provided, not sample data.
+    Analyze the data structure and user query to determine the most appropriate visualization. Make it aesthetic and informative.
     
     RULES:
     1. Return ONLY raw HTML and JavaScript code
     2. Use Chart.js for visualizations (include CDN link)
-    3. Make it responsive and visually appealing
-    4. Include accurate summary statistics boxes (Total Count, Averages, etc.)
+    3. Make it responsive but set fixed height for charts (max 400px)
+    4. Include appropriate titles and labels based on the user query
     5. Handle both tabular data and simple results
     6. No markdown, no explanations, just code
-    7. Create multiple chart types if appropriate
-    8. Include proper titles and labels based on the user query
-    9. Make sure visualizations are mathematically accurate
+    7. If data is complex, create multiple chart types (bar, line, pie) but limit to 2-5 charts
+    8. Use container div with fixed height and overflow: auto
+    9. Add 'chart-container' class to all chart containers
     """
     
     user_prompt = f"""
-    Create an accurate interactive visualization for this query:
+    Create an interactive visualization for this data:
     
     User Query: "{user_query}"
     Tool Used: {tool}
     Data Type: {context['data_type']}
-    Records Available: {context['data_length']}
+    Data Sample: {json.dumps(context['data_sample'], indent=2)}
     
-    Generate a comprehensive visualization with summary statistics boxes.
-    Focus on accurate representation of the data.
+    Generate a comprehensive visualization that helps understand the data.
+    Focus on the most important insights from the query.
+    Make sure charts have fixed heights and don't overflow.
     """
     
     try:
@@ -663,118 +653,107 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
         response = groq_client.invoke(messages)
         visualization_code = response.content.strip()
         
+        # Return both the code and the rendered HTML
         return visualization_code, visualization_code
     except Exception as e:
-        # Fallback to accurate table visualization
-        return generate_accurate_fallback(actual_data, user_query)
-
-def generate_accurate_fallback(data, query):
-    """Generate accurate fallback visualization with proper data handling"""
-    if isinstance(data, list) and len(data) > 0:
-        # Count chronic conditions accurately
-        if "chronic" in query.lower() and "condition" in query.lower():
-            condition_counts = {}
-            for item in data:
-                if isinstance(item, dict) and "chronic_conditions" in item:
-                    conditions = str(item["chronic_conditions"]).split(',')
-                    for condition in conditions:
-                        condition = condition.strip()
-                        if condition:
-                            condition_counts[condition] = condition_counts.get(condition, 0) + 1
-            
-            chart_data = {
-                "labels": list(condition_counts.keys()),
-                "values": list(condition_counts.values())
-            }
-            
-            return f"""
-            <div class="visualization-container">
-                <div class="visualization-title">Chronic Conditions Distribution (Accurate Count)</div>
-                <div class="stats-boxes">
-                    <div class="stat-box">
-                        <h3>Total Conditions</h3>
-                        <p>{sum(condition_counts.values())}</p>
-                    </div>
-                    <div class="stat-box">
-                        <h3>Unique Conditions</h3>
-                        <p>{len(condition_counts)}</p>
-                    </div>
-                </div>
-                <canvas id="conditionChart" width="400" height="200"></canvas>
+        # Fallback to a simple table if visualization generation fails
+        if isinstance(data, list) and len(data) > 0:
+            fallback_code = f"""
+            <div class="visualization-container" style="height: 400px; overflow: auto;">
+                <div class="visualization-title">Data Table</div>
+                <div id="table-container"></div>
             </div>
-            <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
             <script>
-                const ctx = document.getElementById('conditionChart').getContext('2d');
-                const conditionChart = new Chart(ctx, {{
-                    type: 'bar',
-                    data: {{
-                        labels: {json.dumps(list(condition_counts.keys()))},
-                        datasets: [{{
-                            label: 'Number of Patients',
-                            data: {json.dumps(list(condition_counts.values()))},
-                            backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            borderWidth: 1
-                        }}]
-                    }},
-                    options: {{
-                        responsive: true,
-                        plugins: {{
-                            title: {{
-                                display: true,
-                                text: 'Chronic Conditions Distribution'
-                            }}
-                        }}
-                    }}
-                }});
-            </script>
-            """, "Accurate chronic conditions visualization"
-        
-        # Generic table fallback
-        table_html = """
-        <div class="visualization-container">
-            <div class="visualization-title">Data Table</div>
-            <div class="stats-boxes">
-                <div class="stat-box">
-                    <h3>Total Records</h3>
-                    <p>{record_count}</p>
-                </div>
-            </div>
-            <div id="table-container"></div>
-        </div>
-        <script>
-            const data = {json_data};
-            let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse; margin-top: 20px;">';
-            
-            // Add headers
-            tableHtml += '<tr style="background: #f2f2f2;">';
-            Object.keys(data[0]).forEach(key => {{
-                tableHtml += `<th style="padding: 12px; text-align: left;">${{key}}</th>`;
-            }});
-            tableHtml += '</tr>';
-            
-            // Add rows
-            data.forEach(row => {{
+                const data = {json.dumps(data)};
+                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
+                
+                // Add headers
                 tableHtml += '<tr>';
-                Object.values(row).forEach(value => {{
-                    tableHtml += `<td style="padding: 10px; border: 1px solid #ddd;">${{value}}</td>`;
+                Object.keys(data[0]).forEach(key => {{
+                    tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${{key}}</th>`;
                 }});
                 tableHtml += '</tr>';
-            }});
-            
-            tableHtml += '</table>';
-            document.getElementById('table-container').innerHTML = tableHtml;
-        </script>
-        """.format(record_count=len(data), json_data=json.dumps(data))
-        
-        return table_html, table_html
-    else:
-        return f"""
-        <div class="visualization-container">
-            <div class="visualization-title">Result</div>
-            <p>{str(data)}</p>
-        </div>
-        """, "Simple result visualization"
+                
+                // Add rows
+                data.forEach(row => {{
+                    tableHtml += '<tr>';
+                    Object.values(row).forEach(value => {{
+                        tableHtml += `<td style="padding: 8px;">${{value}}</td>`;
+                    }});
+                    tableHtml += '</tr>';
+                }});
+                
+                tableHtml += '</table>';
+                document.getElementById('table-container').innerHTML = tableHtml;
+            </script>
+            """
+        else:
+            fallback_code = f"""
+            <div class="visualization-container" style="height: 200px; overflow: auto;">
+                <div class="visualization-title">Result</div>
+                <p>{str(data)}</p>
+            </div>
+            """
+        return fallback_code, fallback_code
+
+# Add this CSS for the split layout
+st.markdown("""
+    <style>
+    .split-container {
+        display: flex;
+        width: 100%;
+        gap: 20px;
+        margin: 20px 0;
+    }
+    .code-panel {
+        flex: 1;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid #e9ecef;
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    .viz-panel {
+        flex: 1;
+        background: #f8f9fa;
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid #e9ecef;
+        max-height: 500px;
+        overflow-y: auto;
+    }
+    .code-header, .viz-header {
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #333;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .copy-button {
+        background: #4286f4;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.8rem;
+    }
+    .copy-button:hover {
+        background: #397dd2;
+    }
+    .chart-container {
+        height: 350px !important;
+        margin-bottom: 20px;
+    }
+    .visualization-container {
+        height: 400px;
+        overflow: auto;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 
 
 
@@ -928,20 +907,6 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
-    
-    "**VISUALIZATION ENHANCEMENT RULES:**\n"
-    "10. **SUMMARY STATISTICS BOXES:**\n"
-    "   - Always include summary statistics boxes at the top of visualizations\n"
-    "   - Include metrics like: Total Count, Average Value, Sum, Unique Items\n"
-    "   - Use gradient backgrounds and professional styling\n"
-    "   - **Example:** For sales data, show Total Revenue, Average Sale, Number of Transactions\n"
-    "   - **Example:** For care plans, show Total Patients, Average Conditions, Most Common Condition\n\n"
-    
-    "11. **ACCURATE DATA HANDLING:**\n"
-    "   - Use actual data counts, not samples or estimates\n"
-    "   - Perform proper aggregation and calculations\n"
-    "   - Handle null/missing values appropriately\n"
-    "   - **Example:** For 'count of chronic conditions', actually count each condition occurrence\n"
 )
 
     user_prompt = f"""User query: "{query}"
@@ -1535,12 +1500,12 @@ if application == "MCP Application":
     if st.session_state.visualizations:
         st.markdown("---")
         st.markdown("## 📊 Interactive Visualizations")
-    
+
         for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
             with st.expander(
-                    f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-                
-                # Create tabs with Code first, then Visualization
+                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
+            
+            # Create tabs with Code first, then Visualization
                 tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
             
                 with tab1:
@@ -1569,7 +1534,7 @@ if application == "MCP Application":
                         streamed_code = ""
                         for j, char in enumerate(viz_code):
                             streamed_code += char
-                            # Update every 5-10 characters for better performance
+                        # Update every 5-10 characters for better performance
                             if j % 8 == 0 or j == len(viz_code) - 1:
                                 code_placeholder.code(streamed_code, language="html")
                                 time.sleep(0.03)  # Adjust speed as needed
@@ -1607,6 +1572,7 @@ if application == "MCP Application":
             for key in keys_to_remove:
                 del st.session_state[key]
             st.rerun()
+
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
@@ -1872,5 +1838,4 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
-
 
