@@ -22,7 +22,7 @@ if not GROQ_API_KEY:
 
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+    model_name=os.environ.get("GROQ_MODEL", "meta-llama/llama-prompt-guard-2-22m")
 )
 
 # ========== PAGE CONFIG ==========
