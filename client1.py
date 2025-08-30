@@ -928,6 +928,20 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
+    
+    "**VISUALIZATION ENHANCEMENT RULES:**\n"
+    "10. **SUMMARY STATISTICS BOXES:**\n"
+    "   - Always include summary statistics boxes at the top of visualizations\n"
+    "   - Include metrics like: Total Count, Average Value, Sum, Unique Items\n"
+    "   - Use gradient backgrounds and professional styling\n"
+    "   - **Example:** For sales data, show Total Revenue, Average Sale, Number of Transactions\n"
+    "   - **Example:** For care plans, show Total Patients, Average Conditions, Most Common Condition\n\n"
+    
+    "11. **ACCURATE DATA HANDLING:**\n"
+    "   - Use actual data counts, not samples or estimates\n"
+    "   - Perform proper aggregation and calculations\n"
+    "   - Handle null/missing values appropriately\n"
+    "   - **Example:** For 'count of chronic conditions', actually count each condition occurrence\n"
 )
 
     user_prompt = f"""User query: "{query}"
