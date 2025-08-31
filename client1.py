@@ -1531,7 +1531,7 @@ if application == "MCP Application":
             # First (newest) one stays expanded, others collapsed
             expanded_state = True if idx == 0 else False
 
-            with st.expander(f"📊 Visualization for: {q}", expanded=False):
+            with st.expander(f"📊 Visualization for: {q}", expanded=expanded_state):
                 st.markdown("**Generated Code:**")
                 st.code(viz_code, language="python")
 
