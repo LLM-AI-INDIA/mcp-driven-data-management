@@ -800,7 +800,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     tools_description = "\n".join(tool_info)
 
-    system_prompt = (
+    system_prompt = ("""
     "You are an intelligent database router for CRUD operations. "
     "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
 
@@ -961,7 +961,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
-)
+""")
 
     user_prompt = f"""User query: "{query}"
 
