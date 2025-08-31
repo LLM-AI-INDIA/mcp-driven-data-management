@@ -893,6 +893,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "- Support: 'family_children', 'emergency_contacts', 'service_referrals', 'court_dates'\n"
     "- Equipment: 'home_modifications', 'durable_medical_equipment'\n"
     "- Metadata: 'care_plan_type', 'status', 'notes'\n\n"
+    "patients can also be called prisoners\n"
 
     "**ETL & DISPLAY FORMATTING RULES:**\n"
     "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
@@ -939,6 +940,8 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name_of_youth = 'John'\"}}\n"
     "   - **Example Query:** 'show patients needing housing assistance'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"housing LIKE '%assistance%' OR housing = 'Homeless'\"}}\n"
+    "   - **Example Query:** 'show prisoners released in last X days'\n"
+    "   - **→ Correct Tool Call:** {"tool": "careplan_crud", "action": "read", "args": {"time_period": X}}\n"
 
     "7. **CARE PLAN TYPE FILTERING:**\n"
     "   - If user asks for 'reentry care plans' or 'general care plans'\n"
@@ -961,6 +964,17 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
+
+    "10. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
+    "   - For queries like "patients with diabetes", "care plans with name John":\n"
+  "{"tool": "careplan_crud", "action": "read", "args": {"filter_column": "<column>", "filter_value": "<value>"}}\n"
+
+"- For queries like "patients released in recent N days", "last N days", "past N days":\n"
+  "{"tool": "careplan_crud", "action": "read", "args": {"time_period": N}}\n"
+
+"- For general analytics like "summarize care plans", "analyze care plan notes", "show statistics":\n"
+  "{"tool": "careplan_crud", "action": "analyze", "args": {}}\n"
+
 """)
 
     user_prompt = f"""User query: "{query}"
@@ -1067,6 +1081,14 @@ Respond with the exact JSON format with properly extracted parameters."""
                 email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
                 if email_match:
                     args["new_email"] = email_match.group(1)
+            
+            if result.get("tool") == "careplan_crud" and result.get("action") == "read":
+                if "time_period" not in result.get("args", {}):
+                    import re
+                    match = re.search(r"(last|recent|past)\s+(\d+)\s+days", user_query.lower())
+                    if match:
+                        days = int(match.group(2))
+                        result["args"]["time_period"] = days
             
             result["args"] = args
 
