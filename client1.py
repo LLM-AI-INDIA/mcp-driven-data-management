@@ -473,6 +473,21 @@ def _clean_json(raw: str) -> str:
     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
     return json_match.group(0).strip() if json_match else raw.strip()
 
+import requests
+def call_mcp_tool(tool_name: str, operation: str, args: dict) -> dict:
+    """
+    Synchronous helper that calls the MCP server REST endpoint for a tool.
+    Adjust URL/path depending on your FastMCP HTTP transport.
+    """
+    url = st.session_state.get("MCP_SERVER_URL", "http://localhost:8000") + f"/call_tool"
+    payload = {"tool": tool_name, "operation": operation, "args": args}
+    try:
+        resp = requests.post(url, json=payload, timeout=15)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"sql": None, "result": f"❌ error calling MCP tool: {e}"}
+
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
 def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
@@ -550,16 +565,20 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
 
 
 # ========== NEW LLM RESPONSE GENERATOR ==========
-def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
-    """Generate LLM response based on operation result with context"""
+def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str, history_limit: int = 10) -> str:
+    """Generate LLM response based on operation result with context (includes chat history)."""
 
-    # Prepare context for LLM
-    context = {
-        "action": action,
-        "tool": tool,
-        "user_query": user_query,
-        "operation_result": operation_result
-    }
+    # collect last N messages from session (if available)
+    messages_for_llm = []
+    history = st.session_state.get("messages", [])[-history_limit:]
+    for m in history:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        # convert to System/Human/Assistant roles for your LLM client
+        if role == "assistant":
+            messages_for_llm.append(HumanMessage(content=f"(assistant) {content}"))
+        else:
+            messages_for_llm.append(HumanMessage(content=f"(user) {content}"))
 
     system_prompt = (
         "You are a helpful database assistant. Generate a brief, natural response "
@@ -568,21 +587,15 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     )
 
     user_prompt = f"""
-    Based on this database operation context, generate a brief natural response:
-
-    User asked: "{user_query}"
-    Operation: {action}
-    Tool used: {tool}
-    Result: {json.dumps(operation_result, indent=2)}
-
-    Generate a single line response explaining what was done and the outcome.
-    """
+User asked: "{user_query}"
+Operation: {action}
+Tool used: {tool}
+Result: {json.dumps(operation_result, indent=2)}
+Please respond naturally and reference prior conversation context where helpful.
+"""
 
     try:
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
+        messages = [SystemMessage(content=system_prompt)] + messages_for_llm + [HumanMessage(content=user_prompt)]
         response = groq_client.invoke(messages)
         return response.content.strip()
     except Exception as e:
@@ -1361,6 +1374,7 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
+    
         elif msg.get("format") == "reasoning":
             st.markdown(
                 f"""
@@ -1494,6 +1508,16 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
+    
+    # Render saved visualizations (most recent first)
+    if st.session_state.get("visualizations"):
+        st.markdown("### Visualizations")
+        for viz_html, viz_code, q in reversed(st.session_state["visualizations"]):
+            try:
+                components.html(viz_html, height=420, scrolling=True)
+            except Exception as e:
+                st.write("Error rendering visualization:", e)
+
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
     # ========== 2. RENDER VISUALIZATIONS ==========
