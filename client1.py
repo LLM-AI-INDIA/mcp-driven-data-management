@@ -477,44 +477,10 @@ def _clean_json(raw: str) -> str:
     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
     return json_match.group(0).strip() if json_match else raw.strip()
 
-def is_sql_command(text):
-    """
-    Detect if the text is likely a SQL command
-    """
-    sql_keywords = [
-        'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter',
-        'table', 'database', 'view', 'index', 'procedure', 'function',
-        'join', 'union', 'where', 'from', 'into', 'values', 'set',
-        'grant', 'revoke', 'commit', 'rollback', 'truncate', 'explain',
-        'describe', 'show', 'use', 'begin', 'end', 'transaction'
-    ]
-    
-    text_lower = text.lower()
-    
-    # Check for SQL keywords at the beginning of the query
-    first_word = text_lower.split()[0] if text_lower.split() else ""
-    is_sql_start = first_word in sql_keywords
-    
-    # Check for SQL-like patterns
-    has_sql_patterns = any(char in text for char in [';', '(', ')', '*', '`'])
-    
-    # Check for table/column references
-    has_table_references = any(term in text_lower for term in ['from', 'table', 'into', 'database'])
-    
-    return is_sql_start or (has_sql_patterns and has_table_references)
-
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
 def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
     """Validate and clean parameters for specific tools"""
-    
-    # Add sql_executor to the validation function
-    if tool_name == "sql_executor":
-        allowed_params = {
-            'command', 'sql_command', 'query', 'statement', 'explain', 'analyze'
-        }
-        return {k: v for k, v in args.items() if k in allowed_params}
-
     
     # Add careplan_crud to the validation function
     if tool_name == "careplan_crud":
@@ -603,20 +569,6 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
 # ========== NEW LLM RESPONSE GENERATOR ==========
 def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
     """Generate LLM response based on operation result with context"""
-    
-    # Add sql_executor-specific responses
-    if tool == "sql_executor":
-        if isinstance(operation_result, dict) and "result" in operation_result:
-            if isinstance(operation_result["result"], list):
-                count = len(operation_result["result"])
-                return f"Executed SQL command successfully. Returned {count} rows."
-            else:
-                return f"Executed SQL command successfully. {operation_result.get('message', 'Operation completed.')}"
-        elif isinstance(operation_result, str):
-            return f"SQL execution result: {operation_result}"
-        else:
-            return "SQL command executed successfully."
-
     
     # Add careplan-specific responses
     if tool == "careplan_crud":
@@ -835,20 +787,10 @@ st.markdown("""
 
 
 
-# ========== MODIFIED PARSE_USER_QUERY FUNCTION ==========
+
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with SQL command detection"""
-    
-    # First check if this is a direct SQL command
-    if is_sql_command(query):
-        return {
-            "tool": "sql_executor",
-            "action": "execute",
-            "args": {
-                "command": query  # Changed from sql_command to command
-            }
-        }
-    
+    """Enhanced parse user query with careplan support"""
+
     if not available_tools:
         return {"error": "No tools available"}
 
@@ -865,17 +807,15 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     "RESPONSE FORMAT:\n"
     "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
-    
+
     "ACTION MAPPING:\n"
     "- 'read': for viewing, listing, showing, displaying, or getting records\n"
     "- 'create': for adding, inserting, or creating NEW records\n"
     "- 'update': for modifying, changing, or updating existing records\n"
     "- 'delete': for removing, deleting, or destroying records\n"
     "- 'describe': for showing table structure, schema, or column information\n"
-    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n"
-    "- 'execute': for direct SQL command execution (sql_executor only)\n\n"
+    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n\n"
 
-    
     "CRITICAL TOOL SELECTION RULES:\n"
     "\n"
     "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
@@ -894,12 +834,6 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "- Health: 'health_screenings', 'health_assessments', 'chronic_conditions', 'prescribed_medications'\n"
     "- Incarceration: 'release_date' (previously 'actual_release_date'), 'care_plan_notes' (progress during incarceration)\n"
     "- Metadata: 'createdat', 'updatedat'\n\n"
-
-    "6. **DIRECT SQL COMMANDS** → Use 'sql_executor':\n"
-    "   - Any query that looks like raw SQL (CREATE TABLE, SELECT, INSERT, etc.)\n"
-    "   - Database administration commands\n"
-    "   - Complex queries that don't fit other tools\n"
-    "   - Use 'action': 'execute' for all SQL commands\n\n"
 
     "**CARE PLAN COLUMN FILTERING:**\n"
     "   - If the user asks to 'show only name and chronic conditions', 'remove address', or 'exclude phone'.\n"
@@ -1196,34 +1130,79 @@ if application == "MCP Application":
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
 
+    # ========== PROCESS CHAT INPUT ==========
+    if user_query_input and send_clicked:
+        user_query = user_query_input
+        user_steps = []
+        try:
+            enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
+            if not enabled_tools:
+                raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
+
+            p = parse_user_query(user_query, st.session_state.available_tools)
+            tool = p.get("tool")
+            if tool not in enabled_tools:
+                raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
+            if tool not in st.session_state.available_tools:
+                raise Exception(
+                    f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}")
+
+            action = p.get("action")
+            args = p.get("args", {})
+
+            # VALIDATE AND CLEAN PARAMETERS
+            args = validate_and_clean_parameters(tool, args)
+            args = normalize_args(args)
+            p["args"] = args
+
+            # Add conversation history to the request for careplan operations
+            if tool == "careplan_crud" and st.session_state.conversation_history:
+                args["conversation_context"] = st.session_state.conversation_history[-5:]  # Last 5 messages
+            
+            # Update the parsed args
+            p["args"] = args
+
+            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
+            
+            # Update conversation history
+            st.session_state.conversation_history.append({
+                "role": "user", 
+                "content": user_query,
+                "tool": tool,
+                "action": action
+            })
+            
+            if isinstance(raw, dict) and "response" in raw:
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": raw.get("response", ""),
+                    "data": raw.get("data")
+                })
+    
     # ========== TOOLS STATUS AND REFRESH BUTTON ==========
     # Create columns for tools info and refresh button
-    try:
-        col1, col2 = st.columns([4, 1])
-    
-        with col1:
-            # Display discovered tools info
-            if st.session_state.available_tools:
-                st.info(
-                    f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
-            else:
-                st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
+    col1, col2 = st.columns([4, 1])
 
-        with col2:
-            # Small refresh button on main page
-            st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
-            if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
-                with st.spinner("Refreshing tools..."):
-                    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
-                    st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
-                    discovered_tools = discover_tools()
-                    st.session_state.available_tools = discovered_tools
-                    st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+    with col1:
+        # Display discovered tools info
+        if st.session_state.available_tools:
+            st.info(
+                f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
+        else:
+            st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
 
-    except Exception as e:
-        st.error(f"Error in tool discovery: {e}")
+    with col2:
+        # Small refresh button on main page
+        st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
+        if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
+            with st.spinner("Refreshing tools..."):
+                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+                st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
+                discovered_tools = discover_tools()
+                st.session_state.available_tools = discovered_tools
+                st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
+                st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # ========== 1. RENDER CHAT MESSAGES ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
@@ -1449,7 +1428,6 @@ if application == "MCP Application":
             for key in keys_to_remove:
                 del st.session_state[key]
             st.rerun()
-
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
@@ -1505,14 +1483,6 @@ if application == "MCP Application":
 
             p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
-            
-            # Handle SQL executor even if not in available tools
-            if tool == "sql_executor" and tool not in st.session_state.available_tools:
-                # Add sql_executor to available tools if it doesn't exist
-                st.session_state.available_tools["sql_executor"] = "Direct SQL command execution"
-                if tool not in st.session_state.tool_states:
-                    st.session_state.tool_states[tool] = True
-            
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
             if tool not in st.session_state.available_tools:
@@ -1527,30 +1497,88 @@ if application == "MCP Application":
             args = normalize_args(args)
             p["args"] = args
 
-            # For SQL executor, pass the raw SQL command directly
-            if tool == "sql_executor" and "sql_command" in args:
-                # Extract the SQL command and send it as-is
-                sql_command = args["sql_command"]
-                # Remove the sql_command from args to avoid duplication
-                args = {"command": sql_command}
-                p["args"] = args
+            # ========== ENHANCED NAME-BASED RESOLUTION ==========
+            
+            # For SQL Server (customers) operations
+            if tool == "sqlserver_crud":
+                if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
+                    # First, try to find the customer by name
+                    name_to_find = args["name"]
+                    try:
+                        # Search for customer by name
+                        read_result = call_mcp_tool(tool, "read", {})
+                        if isinstance(read_result, dict) and "result" in read_result:
+                            customers = read_result["result"]
+                            # Try exact match first
+                            exact_matches = [c for c in customers if c.get("Name", "").lower() == name_to_find.lower()]
+                            if exact_matches:
+                                args["customer_id"] = exact_matches[0]["Id"]
+                            else:
+                                # Try partial matches (first name or last name)
+                                partial_matches = [c for c in customers if 
+                                    name_to_find.lower() in c.get("Name", "").lower() or
+                                    name_to_find.lower() in c.get("FirstName", "").lower() or 
+                                    name_to_find.lower() in c.get("LastName", "").lower()]
+                                if partial_matches:
+                                    args["customer_id"] = partial_matches[0]["Id"]
+                                else:
+                                    raise Exception(f"❌ Customer '{name_to_find}' not found")
+                    except Exception as e:
+                        if "not found" in str(e):
+                            raise e
+                        else:
+                            raise Exception(f"❌ Error finding customer '{name_to_find}': {str(e)}")
+
+                # Extract new email for updates
+                if action == "update" and "new_email" not in args:
+                    possible_email = extract_email(user_query)
+                    if possible_email:
+                        args["new_email"] = possible_email
+
+            # For PostgreSQL (products) operations  
+            elif tool == "postgresql_crud":
+                if action in ["update", "delete"] and "name" in args and "product_id" not in args:
+                    # First, try to find the product by name
+                    name_to_find = args["name"]
+                    try:
+                        # Search for product by name
+                        read_result = call_mcp_tool(tool, "read", {})
+                        if isinstance(read_result, dict) and "result" in read_result:
+                            products = read_result["result"]
+                            # Try exact match first
+                            exact_matches = [p for p in products if p.get("name", "").lower() == name_to_find.lower()]
+                            if exact_matches:
+                                args["product_id"] = exact_matches[0]["id"]
+                            else:
+                                # Try partial matches
+                                partial_matches = [p for p in products if name_to_find.lower() in p.get("name", "").lower()]
+                                if partial_matches:
+                                    args["product_id"] = partial_matches[0]["id"]
+                                else:
+                                    raise Exception(f"❌ Product '{name_to_find}' not found")
+                    except Exception as e:
+                        if "not found" in str(e):
+                            raise e
+                        else:
+                            raise Exception(f"❌ Error finding product '{name_to_find}': {str(e)}")
+
+                # Extract new price for updates
+                if action == "update" and "new_price" not in args:
+                    possible_price = extract_price(user_query)
+                    if possible_price is not None:
+                        args['new_price'] = possible_price
+
+            # Update the parsed args
+            p["args"] = args
+
+            # Handle describe operations
+            if action == "describe" and "table_name" in args:
+                if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
+                    args["table_name"] = "Customers"
+                if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
+                    args["table_name"] = "products"
 
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
-            
-            # Update conversation history
-            st.session_state.conversation_history.append({
-                "role": "user", 
-                "content": user_query,
-                "tool": tool,
-                "action": action
-            })
-            
-            if isinstance(raw, dict) and "response" in raw:
-                st.session_state.conversation_history.append({
-                    "role": "assistant",
-                    "content": raw.get("response", ""),
-                    "data": raw.get("data")
-                })
             
             # ========== GENERATE VISUALIZATION ==========
             # Extract data for visualization
@@ -1594,21 +1622,10 @@ if application == "MCP Application":
             })
             for step in user_steps:
                 st.session_state.messages.append(step)
-                
-            # Handle SQL executor responses differently
-            if tool == "sql_executor":
-                if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-                    reply, fmt = raw, "sql_crud"
-                elif isinstance(raw, dict) and "message" in raw:
-                    reply, fmt = raw["message"], "text"
-                else:
-                    reply, fmt = format_natural(raw), "text"
+            if isinstance(raw, dict) and "sql" in raw and "result" in raw:
+                reply, fmt = raw, "sql_crud"
             else:
-                if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-                    reply, fmt = raw, "sql_crud"
-                else:
-                    reply, fmt = format_natural(raw), "text"
-                    
+                reply, fmt = format_natural(raw), "text"
             assistant_message = {
                 "role": "assistant",
                 "content": reply,
@@ -1617,7 +1634,7 @@ if application == "MCP Application":
                 "tool": p.get("tool"),
                 "action": p.get("action"),
                 "args": p.get("args"),
-                "user_query": user_query,
+                "user_query": user_query,  # Added user_query to the message
             }
             st.session_state.messages.append(assistant_message)
         st.rerun()  # Rerun so chat output appears
@@ -1628,7 +1645,6 @@ if application == "MCP Application":
           setTimeout(() => { window.scrollTo(0, document.body.scrollHeight); }, 80);
         </script>
     """)
-
 
 # ========== ETL EXAMPLES HELP SECTION ==========
 with st.expander("🔧 ETL Functions & Examples"):
@@ -1677,4 +1693,3 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
-
