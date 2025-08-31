@@ -783,410 +783,84 @@ st.markdown("""
 
 
 
-def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with better DELETE operation handling"""
+def parse_user_query(query: str) -> dict:
+    """
+    Interpret user query and decide which tool/action to call.
+    Falls back to LLM if no direct mapping is found.
+    Returns a dict with: {action, tool, args}
+    """
 
-    if not available_tools:
-        return {"error": "No tools available"}
+    q_lower = query.lower()
 
-    # Build comprehensive tool information for the LLM
-    tool_info = []
-    for tool_name, tool_desc in available_tools.items():
-        tool_info.append(f"- **{tool_name}**: {tool_desc}")
+    # ------------------------
+    # 1. Schema / structure questions
+    # ------------------------
+    if any(word in q_lower for word in ["describe", "structure", "schema", "columns", "fields"]):
+        # try to detect table name
+        tables = ["careplan", "customers", "sales", "calllogs", "productscache"]
+        for t in tables:
+            if t in q_lower:
+                return {"action": "describe", "tool": f"{t}_crud", "args": {"operation": "describe", "table": t}}
+        # generic fallback
+        return {"action": "describe", "tool": "sqlserver_crud", "args": {"operation": "describe"}}
 
-    tools_description = "\n".join(tool_info)
+    # ------------------------
+    # 2. Analysis questions
+    # ------------------------
+    if any(word in q_lower for word in ["analyze", "analysis", "insight", "summary", "stats"]):
+        tables = ["careplan", "customers", "sales", "calllogs"]
+        for t in tables:
+            if t in q_lower:
+                return {"action": "analyze", "tool": f"{t}_crud", "args": {"operation": "analyze", "table": t}}
+        # default analysis tool if table not clear
+        return {"action": "analyze", "tool": "careplan_crud", "args": {"operation": "analyze", "table": "CarePlan"}}
 
-    system_prompt = (
-    "You are an intelligent database router for CRUD operations. "
-    "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
+    # ------------------------
+    # 3. Visualization requests
+    # ------------------------
+    if any(word in q_lower for word in ["visualize", "chart", "plot", "graph"]):
+        # Let main loop handle viz after CRUD result
+        return {"action": "visualize", "tool": "visualization", "args": {"query": query}}
 
-    "RESPONSE FORMAT:\n"
-    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
+    # ------------------------
+    # 4. Data queries (simple heuristic: look for 'show', 'list', 'get')
+    # ------------------------
+    if any(word in q_lower for word in ["show", "list", "get", "find", "top", "average", "count"]):
+        tables = ["careplan", "customers", "sales", "calllogs"]
+        for t in tables:
+            if t in q_lower:
+                return {"action": "read", "tool": f"{t}_crud", "args": {"operation": "read", "query": query}}
+        # fallback: try customers
+        return {"action": "read", "tool": "customers_crud", "args": {"operation": "read", "query": query}}
 
-    "ACTION MAPPING:\n"
-    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-    "- 'create': for adding, inserting, or creating NEW records\n"
-    "- 'update': for modifying, changing, or updating existing records\n"
-    "- 'delete': for removing, deleting, or destroying records\n"
-    "- 'describe': for showing table structure, schema, or column information\n"
-    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n\n"
+    # ------------------------
+    # 5. Safe SQL execution (copy / create / drop table)
+    # ------------------------
+    if "copy" in q_lower and "table" in q_lower:
+        m = re.search(r"copy\s+(\w+)\s+(?:to|as)\s+(\w+)", q_lower)
+        if m:
+            source, dest = m.groups()
+            return {"action": "copy_table", "tool": "safe_sql_executor",
+                    "args": {"operation": "copy_table", "source_table": source, "dest_table": dest}}
 
-    "CRITICAL TOOL SELECTION RULES:\n"
-    "\n"
-    "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
-    "   - 'list products', 'show products', 'display products'\n"
-    "   - 'product inventory', 'product catalog', 'product information'\n"
-    "   - 'add product', 'create product', 'new product'\n"
-    "   - 'update product', 'change product price', 'modify product'\n"
-    "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
-    "   - Any query primarily about products, pricing, or inventory\n"
-    "\n"
-    "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
-    "   - 'list customers', 'show customers', 'display customers'\n"
-    "   - 'customer information', 'customer details'\n"
-    "   - 'add customer', 'create customer', 'new customer'\n"
-    "   - 'update customer', 'change customer email', 'modify customer'\n"
-    "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
-    "   - Any query primarily about customers, names, or emails\n"
-    "\n"
-    "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
-    "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
-    "   - 'sales report', 'revenue data', 'purchase history'\n"
-    "   - 'who bought what', 'customer purchases'\n"
-    "   - Cross-database queries combining customer + product + sales info\n"
-    "   - 'create sale', 'add sale', 'new transaction'\n"
-    "   - Any query asking for combined data from multiple tables\n"
-    "\n"
-    "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
-    "   - 'show care plans', 'list patients', 'display care plans', 'patient records'\n"
-    "   - 'list care plans with name John', 'patients with diabetes'\n"
-    "   - 'show care plan details', 'display patient information'\n"
-    "   - 'patients needing housing assistance', 'care plans with employment status'\n"
-    "   - 'reentry care plans', 'general care plans'\n"
-    "   - Any query related to healthcare records, patient information, or care management\n\n"
+    if "create" in q_lower and "like" in q_lower:
+        m = re.search(r"create\s+table\s+(\w+)\s+like\s+(\w+)", q_lower)
+        if m:
+            dest, source = m.groups()
+            return {"action": "create_like", "tool": "safe_sql_executor",
+                    "args": {"operation": "create_like", "source_table": source, "dest_table": dest}}
 
-    "5. **CALL LOG ANALYSIS QUERIES** → Use 'calllogs_crud':\n"
-    "   - 'analyze call logs', 'show call statistics', 'call center metrics'\n"
-    "   - 'agent performance', 'sentiment analysis', 'issue frequency'\n"
-    "   - 'call volume trends', 'escalation analysis', 'resolution rates'\n"
-    "   - 'show calls by agent [AgentName]', 'calls with negative sentiment'\n"
-    "   - 'call duration analysis', 'wait time statistics'\n"
-    "   - 'top issue categories', 'service quality metrics'\n"
-    "   - Use 'operation': 'analyze' for analytical reports\n"
-    "   - Use 'operation': 'read' for raw call log data\n"
-    "   - Any query related to call logs, agent performance, or customer service metrics\n\n"
+    if "drop" in q_lower and "table" in q_lower:
+        m = re.search(r"drop\s+table\s+(\w+)", q_lower)
+        if m:
+            source = m.group(1)
+            return {"action": "drop_table", "tool": "safe_sql_executor",
+                    "args": {"operation": "drop_table", "source_table": source}}
 
-    "**ENHANCED CARE PLAN FIELD MAPPING:**\n"
-    "The CarePlan table now includes comprehensive real-world fields:\n"
-    "- Base: 'actual_release_date', 'name_of_youth', 'race_ethnicity', 'medi_cal_id_number'\n"
-    "- Health: 'health_screenings', 'health_assessments', 'chronic_conditions', 'prescribed_medications'\n"
-    "- Reentry: 'housing', 'employment', 'income_benefits', 'transportation', 'life_skills'\n"
-    "- Clinical: 'screenings', 'clinical_assessments', 'treatment_history', 'scheduled_appointments'\n"
-    "- Support: 'family_children', 'emergency_contacts', 'service_referrals', 'court_dates'\n"
-    "- Equipment: 'home_modifications', 'durable_medical_equipment'\n"
-    "- Metadata: 'care_plan_type', 'status', 'notes'\n\n"
-
-    "**ETL & DISPLAY FORMATTING RULES:**\n"
-    "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
-    "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
-
-    "1. **DECIMAL FORMATTING:**\n"
-    "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
-    "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
-    "   - **Example Query:** 'show sales with 2 decimal places'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
-
-    "2. **DATE FORMATTING:**\n"
-    "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
-    "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
-    "   - **Example Query:** 'show sales with formatted dates'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
-
-    "3. **NULL VALUE HANDLING:**\n"
-    "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
-    "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
-    "   - **Example Query:** 'show sales but remove records with missing info'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
-
-    "4. **STRING CONCATENATION:**\n"
-    "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
-    "   - Use: {\"display_format\": \"String Concatenation\"}\n"
-    "   - **Example Query:** 'show sales with customer full names'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
-
-    "5. **CARE PLAN COLUMN FILTERING:**\n"
-    "   - If the user asks to 'show only name and chronic conditions', 'remove address', or 'exclude phone'.\n"
-    "   - Use: `columns` field in args with positive or negative column names.\n"
-    "   - **Example Query:** 'show only name and chronic conditions from care plans'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name_of_youth,chronic_conditions\"}}\n"
-    "   - **Example Query:** 'show care plans without address and phone'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"*,-residential_address,-telephone\"}}\n"
-
-    "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
-    "   - If user asks 'care plans mentioning diabetes in chronic conditions', use LIKE\n"
-    "   - Use: {\"where_clause\": \"chronic_conditions LIKE '%diabetes%'\"}\n"
-    "   - **Example Query:** 'list patients with diabetes'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"chronic_conditions LIKE '%diabetes%'\"}}\n"
-    "   - **Example Query:** 'care plans where name is John'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name_of_youth = 'John'\"}}\n"
-    "   - **Example Query:** 'show patients needing housing assistance'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"housing LIKE '%assistance%' OR housing = 'Homeless'\"}}\n"
-
-    "7. **CARE PLAN TYPE FILTERING:**\n"
-    "   - If user asks for 'reentry care plans' or 'general care plans'\n"
-    "   - Use: {\"care_plan_type\": \"Reentry Care Plan\"} or {\"care_plan_type\": \"General Care Plan\"}\n"
-    "   - **Example Query:** 'show reentry care plans'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"care_plan_type\": \"Reentry Care Plan\"}}\n"
-
-    "8. **CALL LOGS ANALYSIS TYPES:**\n"
-    "   - sentiment_by_agent: Agent sentiment performance\n"
-    "   - issue_frequency: Most common issues\n"
-    "   - call_volume_trends: Daily call trends\n"
-    "   - escalation_analysis: Escalation rates by issue\n"
-    "   - agent_performance: Comprehensive agent metrics\n"
-    "   - **Example Query:** 'analyze agent performance'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"agent_performance\"}}\n"
-
-    "9. **CALL LOGS FILTERING:**\n"
-    "   - Use 'agent_name', 'issue_category', 'sentiment_threshold' for filtering\n"
-    "   - **Example Query:** 'show calls with negative sentiment'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
-    "   - **Example Query:** 'calls handled by Sarah Chen'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
-)
-
-    user_prompt = f"""User query: "{query}"
-
-Analyze the query step by step:
-
-1. What is the PRIMARY INTENT? (product, customer, or sales operation)
-2. What ACTION is being requested? (create, read, update, delete, describe)
-3. What ENTITY NAME needs to be extracted? (for delete/update operations)
-4. What SPECIFIC COLUMNS are requested? (for read operations - extract into 'columns' parameter)
-5. What FILTER CONDITIONS are specified? (for read operations - extract into 'where_clause' parameter)
-6. What PARAMETERS need to be extracted from the natural language?
-
-ENTITY NAME EXTRACTION GUIDELINES (CRITICAL FOR DELETE/UPDATE):
-- For "delete Widget" → extract "Widget" and put in 'name' parameter
-- For "delete product Gadget" → extract "Gadget" and put in 'name' parameter  
-- For "delete customer Alice" → extract "Alice" and put in 'name' parameter
-- For "update price of Tool to 30" → extract "Tool" and put in 'name' parameter, extract "30" and put in 'new_price'
-
-COLUMN EXTRACTION GUIDELINES:
-- Look for patterns like "show X, Y", "display X and Y", "get X, Y from Z"
-- Extract only the column names, map them to standard names
-- Put them in a comma-separated string in the 'columns' parameter
-
-WHERE CLAUSE EXTRACTION GUIDELINES:
-- Look for filtering conditions like "exceed", "above", "greater than", "with price over"
-- Convert natural language to SQL-like conditions
-- Handle currency symbols and numbers properly
-- Put the condition in the 'where_clause' parameter
-
-Respond with the exact JSON format with properly extracted parameters."""
-
-    try:
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
-        resp = groq_client.invoke(messages)
-
-        raw = _clean_json(resp.content)
-
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            try:
-                result = ast.literal_eval(raw)
-            except:
-                result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
-
-        # Normalize action names
-        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
-            result["action"] = "read"
-
-        # ENHANCED parameter extraction for DELETE and UPDATE operations
-        if result.get("action") in ["delete", "update"]:
-            args = result.get("args", {})
-            
-            # Extract entity name for delete/update operations if not already extracted
-            if "name" not in args:
-                import re
-                
-                # Enhanced regex patterns for delete operations
-                delete_patterns = [
-                    r'(?:delete|remove)\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                    r'(?:delete|remove)\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                    r'(?:delete|remove)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                    r'(?:update|change)\s+(?:price\s+of\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                ]
-                
-                for pattern in delete_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        extracted_name = match.group(1).strip()
-                        # Clean up common words that might be captured
-                        stop_words = ['product', 'customer', 'price', 'email', 'to', 'of', 'the', 'a', 'an']
-                        name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
-                        if name_words:
-                            args["name"] = ' '.join(name_words)
-                            break
-            
-            # Extract new_price for product updates
-            if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
-                import re
-                price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
-                if price_match:
-                    args["new_price"] = float(price_match.group(1))
-            
-            # Extract new_email for customer updates
-            if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
-                import re
-                email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
-                if email_match:
-                    args["new_email"] = email_match.group(1)
-            
-            result["args"] = args
-
-        # Enhanced parameter extraction for create operations
-        elif result.get("action") == "create":
-            args = result.get("args", {})
-            
-            # Extract name and email from query if not already extracted
-            if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
-                # Try to extract name and email using regex patterns
-                import re
-                
-                # Extract email
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
-                if email_match and "email" not in args:
-                    args["email"] = email_match.group(0)
-                
-                # Extract name (everything between 'customer' and 'with' or before email)
-                if "name" not in args:
-                    # Pattern 1: "create customer [Name] with [email]"
-                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
-                    if not name_match:
-                        # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
-                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
-                    if not name_match:
-                        # Pattern 3: Extract everything before the email
-                        if email_match:
-                            name_part = query[:email_match.start()].strip()
-                            name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
-                    
-                    if name_match:
-                        extracted_name = name_match.group(1).strip()
-                        # Clean up common words
-                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name, flags=re.IGNORECASE).strip()
-                        if extracted_name:
-                            args["name"] = extracted_name
-            
-            result["args"] = args
-
-        # Enhanced parameter extraction for read operations with columns and where_clause
-        elif result.get("action") == "read" and result.get("tool") == "sales_crud":
-            args = result.get("args", {})
-            
-            # Extract columns if not already extracted
-            if "columns" not in args:
-                import re
-                
-                # Look for column specification patterns
-                column_patterns = [
-                    r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
-                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
-                    r'display\s+(.+?)(?:\s+from|\s*$)',
-                ]
-                
-                for pattern in column_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        columns_text = match.group(1).strip()
-                        
-                        # Clean up and standardize column names
-                        if 'and' in columns_text or ',' in columns_text:
-                            # Multiple columns
-                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
-                            cleaned_columns = []
-                            
-                            for col in columns_list:
-                                col = col.strip().lower().replace(' ', '_')
-                                # Map common variations
-                                if col in ['name', 'customer']:
-                                    cleaned_columns.append('customer_name')
-                                elif col in ['price', 'total', 'amount']:
-                                    cleaned_columns.append('total_price')
-                                elif col in ['product']:
-                                    cleaned_columns.append('product_name')
-                                elif col in ['date']:
-                                    cleaned_columns.append('sale_date')
-                                elif col in ['email']:
-                                    cleaned_columns.append('customer_email')
-                                else:
-                                    cleaned_columns.append(col)
-                            
-                            if cleaned_columns:
-                                args["columns"] = ','.join(cleaned_columns)
-                        else:
-                            # Single column
-                            col = columns_text.strip().lower().replace(' ', '_')
-                            if col in ['name', 'customer']:
-                                args["columns"] = 'customer_name'
-                            elif col in ['price', 'total', 'amount']:
-                                args["columns"] = 'total_price'
-                            elif col in ['product']:
-                                args["columns"] = 'product_name'
-                            elif col in ['date']:
-                                args["columns"] = 'sale_date'
-                            elif col in ['email']:
-                                args["columns"] = 'customer_email'
-                            else:
-                                args["columns"] = col
-                        break
-            
-            # Extract where_clause if not already extracted
-            if "where_clause" not in args:
-                import re
-                
-                # Look for filtering conditions
-                where_patterns = [
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:below|less\s+than|under|<)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:equal[s]?|is|=)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:>|above|greater\s+than|more\s+than)\s*(\d+)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:<|below|less\s+than|under)\s*(\d+)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:=|equal[s]?|is)\s*(\d+)',
-                    r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
-                    r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
-                ]
-                
-                for i, pattern in enumerate(where_patterns):
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        value = match.group(1).strip()
-                        
-                        if i <= 2:  # total_price conditions
-                            if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
-                                args["where_clause"] = f"total_price > {value}"
-                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
-                                args["where_clause"] = f"total_price < {value}"
-                            else:
-                                args["where_clause"] = f"total_price = {value}"
-                        elif i <= 5:  # quantity conditions
-                            if 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
-                                args["where_clause"] = f"quantity > {value}"
-                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
-                                args["where_clause"] = f"quantity < {value}"
-                            else:
-                                args["where_clause"] = f"quantity = {value}"
-                        elif i == 6:  # customer name
-                            args["where_clause"] = f"customer_name = '{value}'"
-                        elif i == 7:  # product name
-                            args["where_clause"] = f"product_name = '{value}'"
-                        break
-            
-            result["args"] = args
-
-        # Validate and clean args
-        if "args" in result and isinstance(result["args"], dict):
-            cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
-            result["args"] = cleaned_args
-
-        # Validate tool selection
-        if "tool" in result and result["tool"] not in available_tools:
-            result["tool"] = list(available_tools.keys())[0]
-
-        return result
-
-    except Exception as e:
-        return {
-            "tool": list(available_tools.keys())[0] if available_tools else None,
-            "action": "read",
-            "args": {},
-            "error": f"Failed to parse query: {str(e)}"
-        }
+    # ------------------------
+    # 6. Fallback → let LLM handle as conversational query
+    # ------------------------
+    return {"action": "chat", "tool": "llm_fallback", "args": {"query": query}}
 
 
 async def _invoke_tool(tool: str, action: str, args: dict) -> any:
@@ -1574,82 +1248,6 @@ if application == "MCP Application":
 
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
-    # ========== 2. RENDER VISUALIZATIONS ==========
-    if st.session_state.visualizations:
-        st.markdown("---")
-        st.markdown("## 📊 Interactive Visualizations")
-
-        for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
-            with st.expander(
-                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=False):
-
-            # Create tabs with Code first, then Visualization
-                tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
-
-                with tab1:
-                    st.markdown("**Generated Code**")
-
-                # Initialize streaming state for this visualization if not exists
-                    stream_key = f"stream_complete_{i}"
-                    if stream_key not in st.session_state:
-                        st.session_state[stream_key] = False
-
-                # Create placeholder for streaming effect
-                    code_placeholder = st.empty()
-
-                    if not st.session_state[stream_key]:
-                    # Streaming effect - show code character by character
-                        import time
-
-                    # Show streaming indicator first
-                        with code_placeholder.container():
-                            st.info("🔄 Generating code...")
-
-                    # Small delay to show the loading message
-                        time.sleep(0.5)
-
-                    # Stream the code
-                        streamed_code = ""
-                        for j, char in enumerate(viz_code):
-                            streamed_code += char
-                        # Update every 5-10 characters for better performance
-                            if j % 8 == 0 or j == len(viz_code) - 1:
-                                code_placeholder.code(streamed_code, language="html")
-                                time.sleep(0.03)  # Adjust speed as needed
-
-                    # Mark streaming as complete
-                        st.session_state[stream_key] = True
-
-                    # Force a rerun to show the complete state
-                        st.rerun()
-                    else:
-                    # Show complete code immediately
-                        code_placeholder.code(viz_code, language="html")
-
-                # Adding copy button (only show when streaming is complete)
-                    if st.session_state[stream_key]:
-                        if st.button("📋 Copy Code", key=f"copy_{i}"):
-                            st.session_state.copied_code = viz_code
-                            st.success("Code copied to clipboard!")
-
-                    # Add reset streaming button for demo purposes
-                        if st.button("🔄 Replay Code Generation", key=f"replay_{i}"):
-                            st.session_state[stream_key] = False
-                            st.rerun()
-
-                with tab2:
-                    st.markdown("**Interactive Visualization**")
-                # Use a container with fixed height
-                    with st.container():
-                        components.html(viz_html, height=400, scrolling=True)
-
-        if st.button("🧹 Clear All Visualizations", key="clear_viz"):
-            st.session_state.visualizations = []
-        # Clear all streaming states
-            keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
-            for key in keys_to_remove:
-                del st.session_state[key]
-            st.rerun()
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
