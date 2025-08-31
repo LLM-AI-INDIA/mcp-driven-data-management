@@ -1512,11 +1512,20 @@ if application == "MCP Application":
     # Render saved visualizations (most recent first)
     if st.session_state.get("visualizations"):
         st.markdown("### Visualizations")
-        for viz_html, viz_code, q in reversed(st.session_state["visualizations"]):
-            try:
-                components.html(viz_html, height=420, scrolling=True)
-            except Exception as e:
-                st.write("Error rendering visualization:", e)
+
+        for idx, (viz_html, viz_code, q) in enumerate(reversed(st.session_state["visualizations"])):
+            # First (newest) one stays expanded, others collapsed
+            expanded_state = True if idx == 0 else False
+
+            with st.expander(f"📊 Visualization for: {q}", expanded=expanded_state):
+                st.markdown("**Generated Code:**")
+                st.code(viz_code, language="python")
+
+                st.markdown("**Rendered Chart:**")
+                try:
+                    components.html(viz_html, height=420, scrolling=True)
+                except Exception as e:
+                    st.error(f"Error rendering visualization: {e}")
 
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
