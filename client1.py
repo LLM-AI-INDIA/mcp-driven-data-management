@@ -387,7 +387,7 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-logo_path = "Picture1.png"
+logo_path = "llm.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
