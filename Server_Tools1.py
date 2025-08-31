@@ -6,7 +6,6 @@ import random
 from datetime import datetime, timedelta
 from fastmcp import FastMCP
 import mysql.connector
-from mysql.connector import Error
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -72,9 +71,6 @@ def get_pg_sales_conn():
         password=PG_SALES_PASS,
         sslmode="require",
     )
-
-conversation_history = []
-
 
 
 mcp = FastMCP("CRUDServer")
@@ -317,9 +313,10 @@ def seed_databases():
          (3, 3, 3, 24.99, 74.97)]
     )
 
-    CREATE TABLE IF NOT EXISTS CarePlan ("""
+    sql_cur.execute("""
+    CREATE TABLE IF NOT EXISTS CarePlan (
         ID INT AUTO_INCREMENT PRIMARY KEY,
-        ReleaseDate DATE,
+        ActualReleaseDate DATE,
         NameOfYouth VARCHAR(255),
         RaceEthnicity VARCHAR(100),
         MediCalID VARCHAR(50),
@@ -357,16 +354,16 @@ def seed_databases():
                            'Bupropion', 'Risperidone', 'Insulin', 'None']
 
     careplan_note_templates = [
-        "{name} demonstrated exceptional engagement in cognitive behavioral therapy sessions during incarceration, showing 70% improvement in emotional regulation skills. Family therapy sessions with parents have strengthened communication patterns. Current medication regimen for {condition} is well-tolerated with minimal side effects.",
-        "{name} has successfully maintained good behavior while incarcerated. Post-release housing secured with supportive family network. Educational goals include completing GED program by December 2025. Mental health services include weekly individual therapy and bi-weekly psychiatric consultations.",
-        "{name} is actively participating in substance use treatment program while incarcerated with 45 days of sobriety maintained. Regular attendance at AA/NA meetings demonstrates strong commitment to recovery. Peer mentor relationship established with program alumni.",
-        "Medical follow-ups for {name} during incarceration show consistent attendance at appointments. {condition} management has improved with current treatment protocol. Family communication has strengthened through structured therapy sessions and conflict resolution skills training.",
-        "{name} exhibited strong motivation toward positive behavioral changes while incarcerated, evidenced by completion of anger management program. Educational support services included tutoring and vocational training enrollment. Transportation barriers resolved through public transit training program.",
-        "Therapy progress for {name} during incarceration includes development of healthy coping mechanisms and stress management techniques. Community resource integration successful including enrollment in recreational activities and volunteer opportunities. Family involvement has increased significantly.",
-        "{name} responded positively to trauma-informed care approach with measurable progress in PTSD symptoms reduction during incarceration. Recent assessment shows 60% decrease in anxiety episodes. Social skills development through group therapy sessions shows marked improvement.",
+        "{name} demonstrates exceptional engagement in cognitive behavioral therapy sessions, showing 70% improvement in emotional regulation skills. Family therapy sessions with parents have strengthened communication patterns. Current medication regimen for {condition} is well-tolerated with minimal side effects.",
+        "{name} has successfully maintained stable housing with supportive family network for 6 months. Educational goals include completing GED program by December 2025. Mental health services include weekly individual therapy and bi-weekly psychiatric consultations.",
+        "{name} is actively participating in outpatient substance use treatment program with 45 days of sobriety maintained. Regular attendance at AA/NA meetings (4x weekly) demonstrates strong commitment to recovery. Peer mentor relationship established with program alumni.",
+        "Medical follow-ups for {name} show consistent attendance at appointments. {condition} management has improved with current treatment protocol. Family communication has strengthened through structured therapy sessions and conflict resolution skills training.",
+        "{name} exhibits strong motivation toward positive behavioral changes, evidenced by completion of anger management program. Educational support services include tutoring and vocational training enrollment. Transportation barriers resolved through public transit training program.",
+        "Therapy progress for {name} includes development of healthy coping mechanisms and stress management techniques. Community resource integration successful including enrollment in recreational activities and volunteer opportunities. Family involvement has increased significantly.",
+        "{name} is responding positively to trauma-informed care approach with measurable progress in PTSD symptoms reduction. Recent assessment shows 60% decrease in anxiety episodes. Social skills development through group therapy sessions shows marked improvement.",
         "Case management for {name} has identified multiple strengths including leadership potential and artistic abilities. Family reunification process is progressing well with supervised visits increasing to unsupervised weekend stays.",
-        "{name} faced challenges with medication adherence during initial incarceration period; pill organizer system and reminder apps were implemented successfully. Support system includes mentor, case worker, and peer support specialist meeting weekly.",
-        "Treatment team has recognized {name}'s exceptional progress in developing independent living skills and financial literacy during incarceration. Career counseling has identified interests in healthcare field with plans for CNA training enrollment post-release."
+        "{name} faces ongoing challenges with medication adherence; pill organizer system and reminder apps have been implemented successfully. Support system includes mentor, case worker, and peer support specialist meeting weekly.",
+        "Treatment team has recognized {name}'s exceptional progress in developing independent living skills and financial literacy. Career counseling has identified interests in healthcare field with plans for CNA training enrollment."
     ]
 
     for i in range(100):
@@ -380,11 +377,8 @@ def seed_databases():
         careplan_note = note_template.format(name=youth_name.split()[0],
                                              condition=selected_condition)  # Using first name only
 
-        # Generate release dates - some in past, some in future
-        release_date = datetime.now().date() + timedelta(days=random.randint(-365, 365))
-
         care_plan_data.append((
-            release_date,
+            datetime.now().date() - timedelta(days=random.randint(0, 730)),
             youth_name,
             random.choice(races),
             f"MC{random.randint(1000000, 9999999)}",
@@ -412,158 +406,11 @@ def seed_databases():
         ))
 
     sql_cur.executemany("""
-        INSERT INTO CarePlan (ReleaseDate, NameOfYouth, RaceEthnicity, MediCalID, ResidentialAddress, 
+        INSERT INTO CarePlan (ActualReleaseDate, NameOfYouth, RaceEthnicity, MediCalID, ResidentialAddress, 
                              Telephone, MediCalHealthPlan, HealthScreenings, HealthAssessments, 
                              ChronicConditions, PrescribedMedications, Notes, CarePlanNotes
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, care_plan_data)
-
-def execute_sql_command(sql_command, connection):
-    """
-    Execute SQL command with error handling and LLM-assisted correction
-    """
-    try:
-        cursor = connection.cursor()
-        cursor.execute(sql_command)
-        
-        if sql_command.strip().lower().startswith(('select', 'show', 'describe')):
-            result = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            return {"success": True, "data": result, "columns": columns}
-        else:
-            connection.commit()
-            return {"success": True, "message": f"Command executed successfully. {cursor.rowcount} rows affected."}
-            
-    except Error as e:
-        # Try to understand and correct the SQL command
-        error_msg = str(e)
-        corrected_sql = suggest_sql_correction(sql_command, error_msg)
-        
-        if corrected_sql and corrected_sql != sql_command:
-            try:
-                cursor = connection.cursor()
-                cursor.execute(corrected_sql)
-                
-                if corrected_sql.strip().lower().startswith(('select', 'show', 'describe')):
-                    result = cursor.fetchall()
-                    columns = [desc[0] for desc in cursor.description] if cursor.description else []
-                    return {"success": True, "data": result, "columns": columns, "corrected": True}
-                else:
-                    connection.commit()
-                    return {"success": True, "message": f"Corrected command executed successfully. {cursor.rowcount} rows affected.", "corrected": True}
-                    
-            except Error as e2:
-                return {"success": False, "error": f"Original error: {error_msg}. Correction attempt also failed: {str(e2)}"}
-        
-        return {"success": False, "error": error_msg}
-
-def suggest_sql_correction(sql_command, error_msg):
-    """
-    Use LLM to suggest corrected SQL based on error message
-    This is a simplified version - in practice, you'd integrate with an LLM API
-    """
-    # Simple rule-based corrections
-    sql_lower = sql_command.lower()
-    
-    # Common mistake: using "=" instead of "LIKE" for string comparisons
-    if "unknown column" in error_msg.lower() or "syntax error" in error_msg.lower():
-        # Try to detect if user meant to use LIKE for string comparison
-        if "=" in sql_command and ("'" in sql_command or '"' in sql_command):
-            return sql_command.replace("=", "LIKE", 1)
-    
-    # Common mistake: missing quotes around string values
-    if "truncated" in error_msg.lower() or "syntax" in error_msg.lower():
-        # Simple heuristic to detect missing quotes
-        words = sql_command.split()
-        for i, word in enumerate(words):
-            if word.lower() in ["where", "values", "set"] and i+1 < len(words):
-                next_word = words[i+1]
-                if "=" in next_word and not any(quote in next_word for quote in ["'", '"']):
-                    parts = next_word.split("=")
-                    if len(parts) == 2 and not parts[1].isdigit():
-                        words[i+1] = f"{parts[0]}='{parts[1]}'"
-                        return " ".join(words)
-    
-    return sql_command  # Return original if no correction can be suggested
-
-def handle_user_query(user_input, connection):
-    """
-    Handle user queries with conversation history
-    """
-    global conversation_history
-    
-    # Add user input to conversation history
-    conversation_history.append({"role": "user", "content": user_input})
-    
-    # Check if this is a SQL command
-    if looks_like_sql(user_input):
-        result = execute_sql_command(user_input, connection)
-        
-        # Format response based on result
-        if result["success"]:
-            if "data" in result:
-                response = format_sql_result(result["data"], result.get("columns", []))
-                if result.get("corrected"):
-                    response = "I noticed a small error in your SQL and corrected it:\n\n" + response
-            else:
-                response = result["message"]
-        else:
-            response = f"Error executing SQL: {result['error']}"
-    else:
-        # For non-SQL queries, use conversation history with LLM
-        # In practice, you'd integrate with an LLM API here
-        response = generate_llm_response(user_input, conversation_history)
-    
-    # Add assistant response to conversation history
-    conversation_history.append({"role": "assistant", "content": response})
-    
-    # Keep conversation history manageable (last 10 exchanges)
-    if len(conversation_history) > 20:
-        conversation_history = conversation_history[-20:]
-    
-    return response
-
-def looks_like_sql(text):
-    """
-    Simple heuristic to detect if text looks like SQL
-    """
-    sql_keywords = ["select", "insert", "update", "delete", "create", "drop", "alter", 
-                   "from", "where", "join", "group by", "order by", "having", "limit"]
-    
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in sql_keywords)
-
-def format_sql_result(data, columns):
-    """
-    Format SQL result for display
-    """
-    if not data:
-        return "No results found."
-    
-    # Format as a simple table
-    result = " | ".join(columns) + "\n"
-    result += "-" * (len(" | ".join(columns)) + 10) + "\n"
-    
-    for row in data:
-        result += " | ".join(str(value) for value in row) + "\n"
-    
-    return result
-
-def generate_llm_response(user_input, history):
-    """
-    Generate response using LLM (placeholder - integrate with your LLM API)
-    """
-    # This is a placeholder - in practice, you'd call an LLM API
-    # For now, we'll return a simple response
-    
-    # Check if this is a follow-up question
-    if len(history) > 2 and history[-2]["role"] == "assistant":
-        # This is likely a follow-up question
-        return "I understand this is a follow-up to our previous conversation. Based on our discussion, I'd recommend reviewing the care plan notes for more detailed information about the inmate's progress during incarceration."
-    
-    # Default response for non-SQL queries
-    return "I can help you query the CarePlan database which contains information about inmates' healthcare during incarceration. You can ask me SQL queries or questions about the data. For example, you could ask: 'Show me all inmates with depression' or 'How many inmates have been released this year?'"
-
 
     sql_cur.execute("""
         CREATE TABLE IF NOT EXISTS CallLogs (
@@ -1812,7 +1659,7 @@ async def calllogs_crud(
 
     elif operation == "transcript_search":
         sql = """
-            SELECT
+            SELECT 
                 cl.LogID,
                 cl.CallDate,
                 c.Name as CustomerName,
@@ -1887,7 +1734,7 @@ async def calllogs_crud(
 
         elif analysis_type == "transcript_keywords":
             sql = """
-                SELECT
+                SELECT 
                     IssueCategory,
                     COUNT(*) as CallCount,
                     GROUP_CONCAT(CallTranscript SEPARATOR ' ') as CombinedTranscripts
@@ -1924,15 +1771,15 @@ async def calllogs_crud(
 
         elif analysis_type == "transcript_sentiment":
             sql = """
-                SELECT
+                SELECT 
                     IssueCategory,
                     AVG(SentimentScore) as AvgSentiment,
-                    COUNT(CASE WHEN CallTranscript LIKE '%frustrated%'
-                           OR CallTranscript LIKE '%angry%'
+                    COUNT(CASE WHEN CallTranscript LIKE '%frustrated%' 
+                           OR CallTranscript LIKE '%angry%' 
                            OR CallTranscript LIKE '%upset%' THEN 1 END) as NegativeLanguageCount,
-                    COUNT(CASE WHEN CallTranscript LIKE '%satisfied%'
-                           OR CallTranscript LIKE '%happy%'
-                           OR CallTranscript LIKE '%grateful%'
+                    COUNT(CASE WHEN CallTranscript LIKE '%satisfied%' 
+                           OR CallTranscript LIKE '%happy%' 
+                           OR CallTranscript LIKE '%grateful%' 
                            OR CallTranscript LIKE '%appreciated%' THEN 1 END) as PositiveLanguageCount,
                     COUNT(*) as TotalCalls
                 FROM CallLogs
@@ -1952,14 +1799,14 @@ async def calllogs_crud(
 
         elif analysis_type == "agent_communication":
             sql = """
-                SELECT
+                SELECT 
                     AgentName,
                     COUNT(*) as TotalCalls,
                     AVG(LENGTH(CallTranscript)) as AvgTranscriptLength,
-                    COUNT(CASE WHEN CallTranscript LIKE '%apologized%'
+                    COUNT(CASE WHEN CallTranscript LIKE '%apologized%' 
                            OR CallTranscript LIKE '%sorry%' THEN 1 END) as ApologyCount,
-                    COUNT(CASE WHEN CallTranscript LIKE '%solution%'
-                           OR CallTranscript LIKE '%resolved%'
+                    COUNT(CASE WHEN CallTranscript LIKE '%solution%' 
+                           OR CallTranscript LIKE '%resolved%' 
                            OR CallTranscript LIKE '%fixed%' THEN 1 END) as SolutionOrientedCount,
                     COUNT(CASE WHEN CallTranscript LIKE '%escalat%' THEN 1 END) as EscalationMentions,
                     AVG(CallDuration) as AvgDuration
@@ -1981,15 +1828,15 @@ async def calllogs_crud(
 
         elif analysis_type == "problem_patterns":
             sql = """
-                SELECT
+                SELECT 
                     IssueCategory,
                     ResolutionStatus,
                     COUNT(*) as Frequency,
                     GROUP_CONCAT(
-                        CASE
-                            WHEN CallTranscript LIKE '%recurring%' OR CallTranscript LIKE '%again%'
+                        CASE 
+                            WHEN CallTranscript LIKE '%recurring%' OR CallTranscript LIKE '%again%' 
                                  OR CallTranscript LIKE '%multiple%' OR CallTranscript LIKE '%repeated%'
-                            THEN LogID
+                            THEN LogID 
                         END
                     ) as RecurringIssueLogIDs,
                     AVG(SentimentScore) as AvgSentiment
@@ -2060,8 +1907,8 @@ async def calllogs_crud(
                        "EscalatedCalls": r[2], "EscalationRate": float(r[3])} for r in rows]
 
         else:
-            result = """Unknown analysis type. Available types:
-                     sentiment_by_agent, issue_frequency, call_volume_trends,
+            result = """Unknown analysis type. Available types: 
+                     sentiment_by_agent, issue_frequency, call_volume_trends, 
                      escalation_analysis, agent_performance, transcript_keywords,
                      transcript_sentiment, agent_communication, problem_patterns"""
 
