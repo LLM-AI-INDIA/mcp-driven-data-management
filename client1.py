@@ -1349,6 +1349,25 @@ if application == "MCP Application":
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
 
+    # --- Load all table schemas into session_state for chatbot context ---
+    if "schemas" not in st.session_state:
+        st.session_state.schemas = {}
+
+    try:
+        schemas = {}
+        for tool_name in st.session_state.available_tools.keys():
+            try:
+                # Ask every tool for its schema/describe info
+                schema_result = call_mcp_tool(tool_name, "describe", {})
+                schemas[tool_name] = schema_result.get("result", "No schema available")
+            except Exception as e:
+                schemas[tool_name] = f"⚠️ Failed to load schema: {e}"
+
+        st.session_state.schemas = schemas
+    except Exception as e:
+        st.warning(f"Could not preload schemas: {e}")
+
+
     # ========== TOOLS STATUS AND REFRESH BUTTON ==========
     # Create columns for tools info and refresh button
     col1, col2 = st.columns([4, 1])
@@ -1373,7 +1392,7 @@ if application == "MCP Application":
                 st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
                 st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
-
+    
     # ========== 1. RENDER CHAT MESSAGES ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
     for msg in st.session_state.messages:
@@ -1877,10 +1896,10 @@ if application == "MCP Application":
             })
             for step in user_steps:
                 st.session_state.messages.append(step)
-            if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-                reply, fmt = raw, "sql_crud"
+            if isinstance(result, dict) and "sql" in result and "result" in result:
+                reply, fmt = result, "sql_crud"
             else:
-                reply, fmt = format_natural(raw), "text"
+                reply, fmt = format_natural(result), "text"
             assistant_message = {
                 "role": "assistant",
                 "content": reply,
