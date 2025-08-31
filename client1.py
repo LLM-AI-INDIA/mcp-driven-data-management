@@ -1686,19 +1686,71 @@ if application == "MCP Application":
 
             p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
-            if tool not in enabled_tools:
-                raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
-            if tool not in st.session_state.available_tools:
-                raise Exception(
-                    f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}")
-
             action = p.get("action")
             args = p.get("args", {})
 
-            # VALIDATE AND CLEAN PARAMETERS
-            args = validate_and_clean_parameters(tool, args)
-            args = normalize_args(args)
-            p["args"] = args
+            # If this is a pure chat/fallback action
+            if action == "chat":
+                system_prompt = (
+                "You are a friendly database assistant. "
+                "Answer conversational questions naturally, "
+                "and use prior chat history and schema context if helpful."
+            )
+                schema_context = json.dumps(st.session_state.get("schemas", {}), indent=2)
+                user_prompt = f"""
+                User asked: "{user_query}"
+                Known schemas: {schema_context}
+                Previous conversation: {st.session_state.get("messages", [])[-5:]}
+                """
+
+                try:
+                    messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+                    response = groq_client.invoke(messages)
+                    response_text = response.content.strip()
+                except Exception as e:
+                    response_text = f"⚠️ LLM fallback error: {e}"
+
+                # Append chat messages
+                st.session_state.messages.append({"role": "user", "content": user_query})
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+
+                st.write(response_text)
+
+            else:
+                # Normal tool-based flow
+                if tool not in enabled_tools:
+                    raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
+                if tool not in st.session_state.available_tools:
+                    raise Exception(
+                        f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}"
+                    )
+
+
+                # VALIDATE AND CLEAN PARAMETERS
+                args = validate_and_clean_parameters(tool, args)
+                args = normalize_args(args)
+                p["args"] = args
+
+                result = call_mcp_tool(tool, action, args)
+                response_text = generate_llm_response(result, action, tool, user_query)
+
+                # Append tool messages
+                st.session_state.messages.append({"role": "user", "content": user_query})
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response_text,
+                    "request": {"tool": tool, "action": action, "args": args},
+                })
+
+                st.write(response_text)
+
+                # Auto-visualize only for read results with data
+                if action == "read" and isinstance(result.get("result"), list) and len(result["result"]) > 0:
+                    viz_html, viz_code = generate_visualization(result["result"], user_query, tool)
+                    st.session_state.visualizations.append((viz_html, viz_code, user_query))
+
+        except Exception as e:
+            st.error(f"Error: {e}")
 
             # ========== ENHANCED NAME-BASED RESOLUTION ==========
             
