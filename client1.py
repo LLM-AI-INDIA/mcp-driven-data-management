@@ -5,7 +5,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
@@ -22,7 +22,7 @@ if not GROQ_API_KEY:
 
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    model_name=os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
 )
 
 # ========== PAGE CONFIG ==========
@@ -473,59 +473,6 @@ def _clean_json(raw: str) -> str:
     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
     return json_match.group(0).strip() if json_match else raw.strip()
 
-import requests
-def call_mcp_tool(tool: str, action: str, args: dict) -> any:
-    try:
-        result = asyncio.run(_invoke_tool(tool, action, args))
-        
-        # Check if we have SQL but no results
-        if (isinstance(result, dict) and "sql" in result and 
-            ("result" not in result or result["result"] is None)):
-            
-            sql_query = result["sql"]
-            
-            # First check if read_only_sql tool is available
-            if "read_only_sql" in st.session_state.available_tools:
-                # Determine dialect
-                dialect = "mysql"
-                if tool == "postgresql_crud":
-                    dialect = "postgres"
-                
-                try:
-                    sql_result = call_mcp_tool("read_only_sql", "execute", {
-                        "dialect": dialect,
-                        "sql": sql_query,
-                        "max_rows": 1000
-                    })
-                    
-                    if isinstance(sql_result, dict) and "result" in sql_result:
-                        return {
-                            "sql": sql_query,
-                            "result": sql_result["result"]
-                        }
-                    else:
-                        return {
-                            "sql": sql_query,
-                            "result": "❌ SQL executed but no results returned"
-                        }
-                        
-                except Exception as sql_error:
-                    return {
-                        "sql": sql_query,
-                        "result": f"❌ Error executing SQL: {str(sql_error)}"
-                    }
-            else:
-                # read_only_sql not available, return the SQL as is
-                return result
-        
-        return result
-        
-    except Exception as e:
-        return {
-            "sql": None,
-            "result": f"❌ Error calling MCP tool {tool}: {str(e)}"
-        }
-
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
 def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
@@ -599,28 +546,20 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
         }
         return {k: v for k, v in args.items() if k in allowed_params}
 
-    elif tool_name == "read_only_sql":
-        allowed_params = {"operation", "dialect", "sql", "max_rows"}
-        return {k: v for k, v in args.items() if k in allowed_params}
-
     return args
 
 
 # ========== NEW LLM RESPONSE GENERATOR ==========
-def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str, history_limit: int = 10) -> str:
-    """Generate LLM response based on operation result with context (includes chat history)."""
+def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
+    """Generate LLM response based on operation result with context"""
 
-    # collect last N messages from session (if available)
-    messages_for_llm = []
-    history = st.session_state.get("messages", [])[-history_limit:]
-    for m in history:
-        role = m.get("role", "user")
-        content = m.get("content", "")
-        # convert to System/Human/Assistant roles for your LLM client
-        if role == "assistant":
-            messages_for_llm.append(AIMessage(content=content))
-        else:
-            messages_for_llm.append(HumanMessage(content=content))
+    # Prepare context for LLM
+    context = {
+        "action": action,
+        "tool": tool,
+        "user_query": user_query,
+        "operation_result": operation_result
+    }
 
     system_prompt = (
         "You are a helpful database assistant. Generate a brief, natural response "
@@ -629,15 +568,21 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     )
 
     user_prompt = f"""
-User asked: "{user_query}"
-Operation: {action}
-Tool used: {tool}
-Result: {json.dumps(operation_result, indent=2)}
-Please respond naturally and reference prior conversation context where helpful.
-"""
+    Based on this database operation context, generate a brief natural response:
+
+    User asked: "{user_query}"
+    Operation: {action}
+    Tool used: {tool}
+    Result: {json.dumps(operation_result, indent=2)}
+
+    Generate a single line response explaining what was done and the outcome.
+    """
 
     try:
-        messages = [SystemMessage(content=system_prompt)] + messages_for_llm + [HumanMessage(content=user_prompt)]
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
         response = groq_client.invoke(messages)
         return response.content.strip()
     except Exception as e:
@@ -659,10 +604,10 @@ Please respond naturally and reference prior conversation context where helpful.
 # ========== VISUALIZATION GENERATOR ==========
 def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     """
-    Generate JavaScript visualization code based on data and query.
-    Streams code live while generating, then renders.
-    Returns tuple of (HTML/JS code for the visualization, raw code).
+    Generate JavaScript visualization code based on data and query
+    Returns tuple of (HTML/JS code for the visualization, raw code)
     """
+    
     # Prepare context for the LLM
     context = {
         "user_query": user_query,
@@ -670,7 +615,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
         "data_type": type(data).__name__,
         "data_sample": data[:5] if isinstance(data, list) and len(data) > 0 else data
     }
-
+    
     system_prompt = """
     You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
     Analyze the data structure and user query to determine the most appropriate visualization. Make it aesthetic and informative.
@@ -686,7 +631,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     8. Use container div with fixed height and overflow: auto
     9. Add 'chart-container' class to all chart containers
     """
-
+    
     user_prompt = f"""
     Create an interactive visualization for this data:
     
@@ -699,30 +644,17 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     Focus on the most important insights from the query.
     Make sure charts have fixed heights and don't overflow.
     """
-
+    
     try:
-        # Prepare messages
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-
-        # Placeholder to show live code generation
-        placeholder = st.empty()
-        code_accum = ""
-
-        # Stream response tokens
-        for event in groq_client.stream(messages):
-            token = getattr(event, "content", "")
-            if token:
-                code_accum += token
-                placeholder.code(code_accum, language="html")
-
-        visualization_code = code_accum.strip()
-
+        response = groq_client.invoke(messages)
+        visualization_code = response.content.strip()
+        
         # Return both the code and the rendered HTML
         return visualization_code, visualization_code
-
     except Exception as e:
         # Fallback to a simple table if visualization generation fails
         if isinstance(data, list) and len(data) > 0:
@@ -1450,25 +1382,6 @@ if application == "MCP Application":
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
 
-    # --- Load all table schemas into session_state for chatbot context ---
-    if "schemas" not in st.session_state:
-        st.session_state.schemas = {}
-
-    try:
-        schemas = {}
-        for tool_name in st.session_state.available_tools.keys():
-            try:
-                # Ask every tool for its schema/describe info
-                schema_result = call_mcp_tool(tool_name, "describe", {})
-                schemas[tool_name] = schema_result.get("result", "No schema available")
-            except Exception as e:
-                schemas[tool_name] = f"⚠️ Failed to load schema: {e}"
-
-        st.session_state.schemas = schemas
-    except Exception as e:
-        st.warning(f"Could not preload schemas: {e}")
-
-
     # ========== TOOLS STATUS AND REFRESH BUTTON ==========
     # Create columns for tools info and refresh button
     col1, col2 = st.columns([4, 1])
@@ -1493,7 +1406,7 @@ if application == "MCP Application":
                 st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
                 st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
-    
+
     # ========== 1. RENDER CHAT MESSAGES ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
     for msg in st.session_state.messages:
@@ -1507,7 +1420,6 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
-    
         elif msg.get("format") == "reasoning":
             st.markdown(
                 f"""
@@ -1641,40 +1553,84 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
-    
-    # Render saved visualizations (most recent first)
-    # Auto-render saved visualizations (newest first)
-    if st.session_state.get("visualizations"):
-        st.markdown("### Visualizations")
-
-        for idx, (viz_html, viz_code, q) in enumerate(reversed(st.session_state["visualizations"])):
-            # First (newest) one stays expanded, others collapsed
-            expanded_state = True if idx == 0 else False
-
-            with st.expander(f"📊 Visualization for: {q}", expanded=expanded_state):
-                st.markdown("**Generated Code:**")
-                import time
-
-                if expanded_state:
-                    placeholder = st.empty()
-                    typed = ""
-                    for char in viz_code:
-                        typed += char
-                        placeholder.code(typed, language="html")
-                        time.sleep(0.01)  # adjust speed (0.005 faster, 0.05 slower)
-                else:
-                    st.code(viz_code, language="html")
-
-
-                st.markdown("**Rendered Chart:**")
-                try:
-                    components.html(viz_html, height=420, scrolling=True)
-                except Exception as e:
-                    st.error(f"Error rendering visualization: {e}")
-
-
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
+    # ========== 2. RENDER VISUALIZATIONS ==========
+    if st.session_state.visualizations:
+        st.markdown("---")
+        st.markdown("## 📊 Interactive Visualizations")
+
+        for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
+            with st.expander(
+                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=True):
+
+            # Create tabs with Code first, then Visualization
+                tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
+
+                with tab1:
+                    st.markdown("**Generated Code**")
+
+                # Initialize streaming state for this visualization if not exists
+                    stream_key = f"stream_complete_{i}"
+                    if stream_key not in st.session_state:
+                        st.session_state[stream_key] = False
+
+                # Create placeholder for streaming effect
+                    code_placeholder = st.empty()
+
+                    if not st.session_state[stream_key]:
+                    # Streaming effect - show code character by character
+                        import time
+
+                    # Show streaming indicator first
+                        with code_placeholder.container():
+                            st.info("🔄 Generating code...")
+
+                    # Small delay to show the loading message
+                        time.sleep(0.5)
+
+                    # Stream the code
+                        streamed_code = ""
+                        for j, char in enumerate(viz_code):
+                            streamed_code += char
+                        # Update every 5-10 characters for better performance
+                            if j % 8 == 0 or j == len(viz_code) - 1:
+                                code_placeholder.code(streamed_code, language="html")
+                                time.sleep(0.03)  # Adjust speed as needed
+
+                    # Mark streaming as complete
+                        st.session_state[stream_key] = True
+
+                    # Force a rerun to show the complete state
+                        st.rerun()
+                    else:
+                    # Show complete code immediately
+                        code_placeholder.code(viz_code, language="html")
+
+                # Adding copy button (only show when streaming is complete)
+                    if st.session_state[stream_key]:
+                        if st.button("📋 Copy Code", key=f"copy_{i}"):
+                            st.session_state.copied_code = viz_code
+                            st.success("Code copied to clipboard!")
+
+                    # Add reset streaming button for demo purposes
+                        if st.button("🔄 Replay Code Generation", key=f"replay_{i}"):
+                            st.session_state[stream_key] = False
+                            st.rerun()
+
+                with tab2:
+                    st.markdown("**Interactive Visualization**")
+                # Use a container with fixed height
+                    with st.container():
+                        components.html(viz_html, height=400, scrolling=True)
+
+        if st.button("🧹 Clear All Visualizations", key="clear_viz"):
+            st.session_state.visualizations = []
+        # Clear all streaming states
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
+            st.rerun()
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
@@ -1723,81 +1679,29 @@ if application == "MCP Application":
     if user_query_input and send_clicked:
         user_query = user_query_input
         user_steps = []
-        result = None
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
             if not enabled_tools:
                 raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
-    
+
             p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
+            if tool not in enabled_tools:
+                raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
+            if tool not in st.session_state.available_tools:
+                raise Exception(
+                    f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}")
+
             action = p.get("action")
             args = p.get("args", {})
+
+            # VALIDATE AND CLEAN PARAMETERS
+            args = validate_and_clean_parameters(tool, args)
+            args = normalize_args(args)
+            p["args"] = args
+
+            # ========== ENHANCED NAME-BASED RESOLUTION ==========
             
-            # DEBUG: Show what we're about to call
-            st.write(f"DEBUG: Calling tool '{tool}' with action '{action}' and args: {args}")
-            
-            if tool:
-                result = call_mcp_tool(tool, action, args)
-                
-            # DEBUG: Show what we got back
-            st.write(f"DEBUG: Result type: {type(result)}")
-            if isinstance(result, dict):
-                st.write(f"DEBUG: Result keys: {list(result.keys())}")
-                if "sql" in result:
-                    st.write(f"DEBUG: SQL: {result['sql']}")
-                if "result" in result:
-                    st.write(f"DEBUG: Result data: {result['result']}")
-    
-            # If this is a pure chat/fallback action
-            if action == "chat":
-                system_prompt = (
-                    "You are a friendly database assistant. "
-                    "Answer conversational questions naturally, "
-                    "and use prior chat history and schema context if helpful."
-                )
-                
-                # history
-                history = st.session_state.get("messages", [])[-10:]
-                prior_msgs = []
-                for m in history:
-                    if m.get("role") == "assistant":
-                        prior_msgs.append(AIMessage(content=m.get("content","")))
-                    else:
-                        prior_msgs.append(HumanMessage(content=m.get("content","")))
-                schema_context = json.dumps(st.session_state.get("schemas", {}), indent=2)
-                user_msg = HumanMessage(content=f'{user_query}\n\n(You may use these schemas if relevant)\n{schema_context}')
-    
-                
-                try:
-                    messages = [SystemMessage(content=system_prompt)] + prior_msgs + [user_msg]
-                    response = groq_client.invoke(messages)
-                    response_text = response.content.strip()
-                except Exception as e:
-                    response_text = f"⚠️ LLM fallback error: {e}"
-    
-                # Append chat messages
-                st.session_state.messages.append({"role": "user", "content": user_query})
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
-                st.rerun()
-    
-            if tool:
-                result = call_mcp_tool(tool, action, args)  
-    
-            if result is not None:
-                if isinstance(result, dict) and "sql" in result and "result" in result:
-                    reply, fmt = result, "sql_crud"
-                else:
-                    reply, fmt = format_natural(result), "text"
-    
-                st.session_state.messages.append({"role": "user", "content": user_query})
-                st.session_state.messages.append({"role": "assistant", "content": reply})
-                st.rerun()
-        
-        except Exception as e:
-            st.error(f"Error: {e}")                
-                # ========== ENHANCED NAME-BASED RESOLUTION ==========
-        
             # For SQL Server (customers) operations
             if tool == "sqlserver_crud":
                 if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
@@ -1827,13 +1731,13 @@ if application == "MCP Application":
                             raise e
                         else:
                             raise Exception(f"❌ Error finding customer '{name_to_find}': {str(e)}")
-    
+
                 # Extract new email for updates
                 if action == "update" and "new_email" not in args:
                     possible_email = extract_email(user_query)
                     if possible_email:
                         args["new_email"] = possible_email
-    
+
             # For PostgreSQL (products) operations  
             elif tool == "postgresql_crud":
                 if action in ["update", "delete"] and "name" in args and "product_id" not in args:
@@ -1860,93 +1764,83 @@ if application == "MCP Application":
                             raise e
                         else:
                             raise Exception(f"❌ Error finding product '{name_to_find}': {str(e)}")
-    
+
                 # Extract new price for updates
                 if action == "update" and "new_price" not in args:
                     possible_price = extract_price(user_query)
                     if possible_price is not None:
                         args['new_price'] = possible_price
-    
+
             # Update the parsed args
             p["args"] = args
-    
+
             # Handle describe operations
             if action == "describe" and "table_name" in args:
                 if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
                     args["table_name"] = "Customers"
                 if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
                     args["table_name"] = "products"
-    
-            try:
-                raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
+
+            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
             
             # ========== GENERATE VISUALIZATION ==========
-                # Extract data for visualization
-                viz_data = raw
-                if isinstance(raw, dict) and "result" in raw:
-                    viz_data = raw["result"]
-                
-                # Generate visualization for read operations with data
-                if action == "read" and viz_data:
-                    # Handle different data formats
-                    actual_data = None
-                    
-                    if isinstance(viz_data, dict) and "result" in viz_data:
-                        actual_data = viz_data["result"]  # This is the actual data
-                    elif isinstance(viz_data, (list, dict)):
-                        actual_data = viz_data
-                    
-                    if actual_data and (
-                        (isinstance(actual_data, list) and len(actual_data) > 0) or 
-                        (isinstance(actual_data, dict) and len(actual_data) > 0)
-                    ):
-                        with st.spinner("Generating visualization..."):
-                            viz_code, viz_html = generate_visualization(actual_data, user_query, tool)
-                
-                        # Add to visualization list with both code and HTML
-                        if "visualizations" not in st.session_state:
-                            st.session_state.visualizations = []                    
-                        st.session_state.visualizations.append((viz_html, viz_code, user_query))
-                
-                        st.success("Visualization generated successfully!")
-                
-                st.session_state.messages.append({
-                    "role": "user",
-                    "content": user_query,
-                    "format": "text",
-                })
-                
-                if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-                    reply, fmt = raw, "sql_crud"
-                else:
-                    reply, fmt = format_natural(raw), "text"
-                    
-                assistant_message = {
-                    "role": "assistant",
-                    "content": reply,
-                    "format": fmt,
-                    "request": p,
-                    "tool": p.get("tool"),
-                    "action": p.get("action"),
-                    "args": p.get("args"),
-                    "user_query": user_query,
-                }
-                st.session_state.messages.append(assistant_message)
-                st.rerun()
-                
-            except Exception as inner_e:
-                reply, fmt = f"⚠️ Error: {inner_e}", "text"
-                st.session_state.messages.append({
-                    "role": "user",
-                    "content": user_query,
-                    "format": "text",
-                })
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": reply,
-                    "format": fmt,
-                })
-                st.rerun()
+            # Extract data for visualization
+            viz_data = raw
+            if isinstance(raw, dict) and "result" in raw:
+                viz_data = raw["result"]
+            
+            # Generate visualization for read operations with data
+            if action == "read" and viz_data and (
+                (isinstance(viz_data, list) and len(viz_data) > 0) or 
+                (isinstance(viz_data, dict) and len(viz_data) > 0)
+            ):
+                with st.spinner("Generating visualization..."):
+                    viz_code, viz_html = generate_visualization(viz_data, user_query, tool)
+
+                # Add to visualization list with both code and HTML
+                if "visualizations" not in st.session_state:
+                    st.session_state.visualizations = []                    
+                st.session_state.visualizations.append((viz_html, viz_code, user_query))
+
+                st.success("Visualization generated successfully!")
+            
+        except Exception as e:
+            reply, fmt = f"⚠️ Error: {e}", "text"
+            assistant_message = {
+                "role": "assistant",
+                "content": reply,
+                "format": fmt,
+            }
+            st.session_state.messages.append({
+                "role": "user",
+                "content": user_query,
+                "format": "text",
+            })
+            st.session_state.messages.append(assistant_message)
+        else:
+            st.session_state.messages.append({
+                "role": "user",
+                "content": user_query,
+                "format": "text",
+            })
+            for step in user_steps:
+                st.session_state.messages.append(step)
+            if isinstance(raw, dict) and "sql" in raw and "result" in raw:
+                reply, fmt = raw, "sql_crud"
+            else:
+                reply, fmt = format_natural(raw), "text"
+            assistant_message = {
+                "role": "assistant",
+                "content": reply,
+                "format": fmt,
+                "request": p,
+                "tool": p.get("tool"),
+                "action": p.get("action"),
+                "args": p.get("args"),
+                "user_query": user_query,  # Added user_query to the message
+            }
+            st.session_state.messages.append(assistant_message)
+        st.rerun()  # Rerun so chat output appears
 
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
     components.html("""
