@@ -1533,7 +1533,15 @@ if application == "MCP Application":
 
             with st.expander(f"📊 Visualization for: {q}", expanded=expanded_state):
                 st.markdown("**Generated Code:**")
-                st.code(viz_code, language="python")
+                import time
+                # Show generated code with typing effect
+                placeholder = st.empty()
+                typed = ""
+                for char in viz_code:
+                    typed += char
+                    placeholder.code(typed, language="html")
+                    time.sleep(0.01)  # adjust speed (0.005 faster, 0.05 slower)
+
 
                 st.markdown("**Rendered Chart:**")
                 try:
