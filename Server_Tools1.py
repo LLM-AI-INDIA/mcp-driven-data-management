@@ -1,3 +1,4 @@
+import pandas as pd
 import os
 import pyodbc
 import psycopg2
@@ -334,83 +335,34 @@ def seed_databases():
     );
     """)
 
-    care_plan_data = []
+    df = pd.read_csv("output.tsv", sep="\t")
+    insert_sql = """
+                INSERT INTO CarePlan (
+                    ActualReleaseDate, NameOfYouth, RaceEthnicity, MediCalID,
+                    ResidentialAddress, Telephone, MediCalHealthPlan, HealthScreenings,
+                    HealthAssessments, ChronicConditions, PrescribedMedications,
+                    Notes, CarePlanNotes
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
 
-    youth_names = ['James Smith', 'Maria Garcia', 'David Johnson', 'Sarah Williams', 'Michael Brown',
-                   'Jessica Davis', 'Christopher Miller', 'Ashley Wilson', 'Matthew Moore', 'Amanda Taylor',
-                   'Joshua Anderson', 'Jennifer Thomas', 'Daniel Jackson', 'Elizabeth White', 'Andrew Harris',
-                   'Michelle Martin', 'Anthony Thompson', 'Emily Garcia', 'Robert Martinez', 'Nicole Rodriguez']
-
-    races = ['Caucasian', 'African American', 'Hispanic/Latino', 'Asian', 'Native American',
-             'Pacific Islander', 'Multiracial', 'Other']
-
-    health_plans = ['Anthem Blue Cross', 'Kaiser Permanente', 'Health Net', 'Blue Shield of California',
-                    'Molina Healthcare', 'LA Care Health Plan', 'Community Health Group']
-
-    chronic_conditions_options = ['Asthma', 'Diabetes', 'Hypertension', 'Depression', 'Anxiety', 'ADHD',
-                                  'Bipolar Disorder', 'PTSD', 'Substance Use Disorder', 'None']
-
-    medications_options = ['Metformin', 'Lisinopril', 'Albuterol', 'Sertraline', 'Escitalopram',
-                           'Bupropion', 'Risperidone', 'Insulin', 'None']
-
-    careplan_note_templates = [
-        "{name} demonstrates exceptional engagement in cognitive behavioral therapy sessions, showing 70% improvement in emotional regulation skills. Family therapy sessions with parents have strengthened communication patterns. Current medication regimen for {condition} is well-tolerated with minimal side effects.",
-        "{name} has successfully maintained stable housing with supportive family network for 6 months. Educational goals include completing GED program by December 2025. Mental health services include weekly individual therapy and bi-weekly psychiatric consultations.",
-        "{name} is actively participating in outpatient substance use treatment program with 45 days of sobriety maintained. Regular attendance at AA/NA meetings (4x weekly) demonstrates strong commitment to recovery. Peer mentor relationship established with program alumni.",
-        "Medical follow-ups for {name} show consistent attendance at appointments. {condition} management has improved with current treatment protocol. Family communication has strengthened through structured therapy sessions and conflict resolution skills training.",
-        "{name} exhibits strong motivation toward positive behavioral changes, evidenced by completion of anger management program. Educational support services include tutoring and vocational training enrollment. Transportation barriers resolved through public transit training program.",
-        "Therapy progress for {name} includes development of healthy coping mechanisms and stress management techniques. Community resource integration successful including enrollment in recreational activities and volunteer opportunities. Family involvement has increased significantly.",
-        "{name} is responding positively to trauma-informed care approach with measurable progress in PTSD symptoms reduction. Recent assessment shows 60% decrease in anxiety episodes. Social skills development through group therapy sessions shows marked improvement.",
-        "Case management for {name} has identified multiple strengths including leadership potential and artistic abilities. Family reunification process is progressing well with supervised visits increasing to unsupervised weekend stays.",
-        "{name} faces ongoing challenges with medication adherence; pill organizer system and reminder apps have been implemented successfully. Support system includes mentor, case worker, and peer support specialist meeting weekly.",
-        "Treatment team has recognized {name}'s exceptional progress in developing independent living skills and financial literacy. Career counseling has identified interests in healthcare field with plans for CNA training enrollment."
-    ]
-
-    for i in range(100):
-        youth_name = random.choice(youth_names)
-        selected_condition = random.choice(
-            ['Anxiety', 'Depression', 'ADHD', 'PTSD', 'Bipolar Disorder']) if random.choice(
-            [True, False]) else 'ongoing treatment'
-
-        # Create personalized note
-        note_template = random.choice(careplan_note_templates)
-        careplan_note = note_template.format(name=youth_name.split()[0],
-                                             condition=selected_condition)  # Using first name only
-
-        care_plan_data.append((
-            datetime.now().date() - timedelta(days=random.randint(0, 730)),
-            youth_name,
-            random.choice(races),
-            f"MC{random.randint(1000000, 9999999)}",
-            f"{random.randint(100, 9999)} {random.choice(['Main', 'Oak', 'Maple', 'Pine'])} St, "
-            f"{random.choice(['Los Angeles', 'San Diego', 'San Francisco', 'Sacramento', 'Oakland'])} CA",
-            f"{random.randint(200, 999)}-{random.randint(200, 999)}-{random.randint(1000, 9999)}",
-            random.choice(health_plans),
-
-            f"Last screening: {random.choice(['2023', '2024'])}; "
-            f"Results: {random.choice(['Normal', 'Abnormal - follow up needed', 'Pending'])}",
-
-            f"Comprehensive assessment completed; Risk level: {random.choice(['Low', 'Medium', 'High'])}",
-
-            ", ".join(random.sample([c for c in chronic_conditions_options if c != 'None'],
-                                    random.randint(0, 2))) or 'None',
-
-            ", ".join(random.sample([m for m in medications_options if m != 'None'],
-                                    random.randint(0, 3))) or 'None',
-
-            f"Youth shows {random.choice(['excellent', 'good', 'fair', 'poor'])} progress in treatment. "
-            f"Primary focus areas: {random.choice(['education', 'family relationships', 'mental health', 'substance use'])}. "
-            f"Strengths: {random.choice(['motivation', 'family support', 'academic ability', 'resilience'])}.",
-
-            careplan_note
+    for _, row in df.iterrows():
+        sql_cur.execute(insert_sql, (
+        row.get('ActualReleaseDate'),
+        row.get('NameOfYouth'),
+        row.get('RaceEthnicity'),
+        row.get('MediCalID'),
+        row.get('ResidentialAddress'),
+        row.get('Telephone'),
+        row.get('MediCalHealthPlan'),
+        row.get('HealthScreenings'),
+        row.get('HealthAssessments'),
+        row.get('ChronicConditions'),
+        row.get('PrescribedMedications'),
+        row.get('Notes'),
+        row.get('CarePlanNotes')
         ))
 
-    sql_cur.executemany("""
-        INSERT INTO CarePlan (ActualReleaseDate, NameOfYouth, RaceEthnicity, MediCalID, ResidentialAddress, 
-                             Telephone, MediCalHealthPlan, HealthScreenings, HealthAssessments, 
-                             ChronicConditions, PrescribedMedications, Notes, CarePlanNotes
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, care_plan_data)
+
 
     sql_cur.execute("""
         CREATE TABLE IF NOT EXISTS CallLogs (
@@ -720,6 +672,104 @@ def find_product_by_name(name: str) -> dict:
 
     except Exception as e:
         return {"found": False, "error": f"Database error: {str(e)}"}
+
+
+
+@mcp.tool()
+async def read_only_sql(
+    operation: str = "execute",
+    dialect: str = "mysql",      # 'mysql' | 'postgres'
+    sql: str = "",
+    max_rows: int = 200
+) -> dict:
+    """
+    Execute a read-only SELECT against a configured database.
+    Blocks any non-SELECT statements.
+    """
+    import re
+
+    if not sql or not isinstance(sql, str):
+        return {"sql": None, "result": "❌ Provide a SQL string."}
+
+    q = sql.strip().rstrip(";")
+
+    # allow only single SELECT statement
+    if not re.match(r"(?is)^\s*select\b", q):
+        return {"sql": None, "result": "❌ Only SELECT is allowed in read_only_sql."}
+    if re.search(r"(?is)\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|exec|call|merge)\b", q):
+        return {"sql": None, "result": "❌ Only SELECT is allowed in read_only_sql."}
+
+    try:
+        if dialect == "mysql":
+            conn = get_mysql_conn()
+            cur = conn.cursor(dictionary=True)
+            cur.execute(q)
+            rows = cur.fetchmany(max_rows)
+            result = rows
+        elif dialect == "postgres":
+            conn = get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(q)
+            rows = cur.fetchmany(max_rows)
+            cols = [d[0] for d in cur.description]
+            result = [dict(zip(cols, r)) for r in rows]
+        else:
+            return {"sql": q, "result": f"❌ Unknown dialect '{dialect}'. Use 'mysql' or 'postgres'."}
+        return {"sql": q, "result": result}
+    except Exception as e:
+        return {"sql": q, "result": f"❌ SQL error: {e}"}
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
+
+
+@mcp.tool()
+async def safe_sql_executor(operation: str, source_table: str = None, dest_table: str = None) -> dict:
+    """
+    Safe helper for table-level DDL:
+    - operation: 'copy_table', 'create_like', 'drop_table'
+    """
+    conn = get_mysql_conn()
+    cur = conn.cursor()
+    try:
+        if operation == "copy_table":
+            if not source_table or not dest_table:
+                return {"sql": None, "result": "❌ source_table and dest_table required"}
+            sql = f"CREATE TABLE `{dest_table}` LIKE `{source_table}`;"
+            cur.execute(sql)
+            cur.execute(f"INSERT INTO `{dest_table}` SELECT * FROM `{source_table}`;")
+            conn.commit()
+            return {"sql": sql, "result": f"✅ Table `{dest_table}` created as copy of `{source_table}`."}
+
+        if operation == "create_like":
+            if not source_table or not dest_table:
+                return {"sql": None, "result": "❌ source_table and dest_table required"}
+            sql = f"CREATE TABLE `{dest_table}` LIKE `{source_table}`;"
+            cur.execute(sql)
+            conn.commit()
+            return {"sql": sql, "result": f"✅ Table `{dest_table}` created LIKE `{source_table}`."}
+
+        if operation == "drop_table":
+            if not source_table:
+                return {"sql": None, "result": "❌ source_table required"}
+            # extra safety: disallow dropping core tables
+            if source_table.lower() in ("customers", "careplan", "sales", "calllogs", "productscache"):
+                return {"sql": None, "result": f"❌ Dropping `{source_table}` is not allowed."}
+            sql = f"DROP TABLE IF EXISTS `{source_table}`;"
+            cur.execute(sql)
+            conn.commit()
+            return {"sql": sql, "result": f"✅ Table `{source_table}` dropped."}
+
+        return {"sql": None, "result": f"❌ Unknown operation {operation}"}
+    except Exception as e:
+        return {"sql": None, "result": f"❌ SQL error: {e}"}
+    finally:
+        conn.close()
+
+
+
 
 
 @mcp.tool()
@@ -1416,18 +1466,30 @@ async def sales_crud(
     else:
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
+from datetime import datetime, timedelta
+from collections import Counter
+import re
+from typing import Any
 
 @mcp.tool()
 async def careplan_crud(
-        operation: str,
-        columns: str = None,
-        where_clause: str = None,
-        limit: int = None,
-        care_plan_type: str = None,
-        status: str = None
+    operation: str,
+    columns: str = None,
+    where_clause: str = None,
+    time_period: int = None,  # ✅ New param for recent N days
+    limit: int = None,
+    care_plan_type: str = None,
+    status: str = None
 ) -> Any:
-    if operation != "read":
-        return {"sql": None, "result": "❌ Only 'read' operation is supported for care plans."}
+    """
+    Handles CarePlan data for read and analysis operations.
+    Supports:
+    - Read with optional columns, where_clause, time_period, limit
+    - Analyze for stats and CarePlanNotes summary
+    """
+
+    if operation not in ["read", "analyze"]:
+        return {"sql": None, "result": "❌ Only 'read' and 'analyze' operations are supported for care plans."}
 
     conn = get_mysql_conn()
     cur = conn.cursor()
@@ -1441,19 +1503,68 @@ async def careplan_crud(
         "residential_address": "ResidentialAddress",
         "telephone": "Telephone",
         "medi_cal_health_plan": "MediCalHealthPlan",
-
         "health_screenings": "HealthScreenings",
         "health_assessments": "HealthAssessments",
         "chronic_conditions": "ChronicConditions",
         "prescribed_medications": "PrescribedMedications",
-
         "notes": "Notes",
         "careplan_notes": "CarePlanNotes",
-
         "created_at": "CreatedAt",
         "updated_at": "UpdatedAt"
     }
 
+    # ✅ ANALYZE OPERATION
+    if operation == "analyze":
+        try:
+            # Total count
+            cur.execute("SELECT COUNT(*) FROM CarePlan;")
+            total = cur.fetchone()[0]
+
+            # Breakdown by RaceEthnicity
+            cur.execute("""
+                SELECT RaceEthnicity, COUNT(*) 
+                FROM CarePlan 
+                GROUP BY RaceEthnicity 
+                ORDER BY COUNT(*) DESC 
+                LIMIT 10;
+            """)
+            by_race = cur.fetchall()
+
+            # Breakdown by ChronicConditions
+            cur.execute("""
+                SELECT ChronicConditions, COUNT(*) 
+                FROM CarePlan 
+                GROUP BY ChronicConditions 
+                ORDER BY COUNT(*) DESC 
+                LIMIT 10;
+            """)
+            chronic = cur.fetchall()
+
+            # ✅ Analyze CarePlanNotes
+            cur.execute("SELECT CarePlanNotes FROM CarePlan WHERE CarePlanNotes IS NOT NULL;")
+            notes_rows = cur.fetchall()
+            notes_text = " ".join([row[0] for row in notes_rows if row[0]])
+
+            # Basic keyword frequency (ignore words <4 letters)
+            words = re.findall(r'\b[a-zA-Z]{4,}\b', notes_text.lower())
+            common_words = Counter(words).most_common(20)
+
+            conn.close()
+            return {
+                "sql": None,
+                "result": {
+                    "total": total,
+                    "by_race": by_race,
+                    "top_chronic_conditions": chronic,
+                    "careplan_notes_summary": common_words
+                }
+            }
+        except Exception as e:
+            conn.close()
+            return {"sql": None, "result": f"❌ Analysis Error: {str(e)}"}
+
+    # ✅ READ OPERATION
+    # Select columns
     selected_columns = []
     column_aliases = []
 
@@ -1462,7 +1573,6 @@ async def careplan_crud(
         if raw_cols.startswith("*"):
             selected_columns = list(available_columns.values())
             column_aliases = list(available_columns.keys())
-
             exclusions = [col.strip().replace("-", "").replace(" ", "_")
                           for col in raw_cols.split(",") if col.startswith("-")]
             selected_columns, column_aliases = zip(*[
@@ -1498,11 +1608,25 @@ async def careplan_crud(
     sql = f"SELECT {select_clause} FROM CarePlan WHERE 1=1"
     query_params = []
 
+    # ✅ Apply time filter
+    if time_period and isinstance(time_period, int):
+        sql += " AND ActualReleaseDate >= %s"
+        recent_date = (datetime.now() - timedelta(days=time_period)).date()
+        query_params.append(recent_date)
+
+    # ✅ Apply custom where clause
     if where_clause and where_clause.strip():
         sql += f" AND {where_clause}"
 
     if limit:
         sql += f" LIMIT {limit}"
+
+    # ✅ Fill NULL dates with current date (optional)
+    cur.execute("SELECT COUNT(*) FROM CarePlan WHERE ActualReleaseDate IS NULL;")
+    null_count = cur.fetchone()[0]
+    if null_count > 0:
+        cur.execute("UPDATE CarePlan SET ActualReleaseDate = %s WHERE ActualReleaseDate IS NULL;", (datetime.now().date(),))
+        conn.commit()
 
     try:
         cur.execute(sql, query_params)
