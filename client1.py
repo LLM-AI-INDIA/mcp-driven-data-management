@@ -5,7 +5,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 from langchain_groq import ChatGroq
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 import streamlit.components.v1 as components
@@ -561,6 +561,10 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
         }
         return {k: v for k, v in args.items() if k in allowed_params}
 
+    elif tool_name == "read_only_sql":
+        allowed_params = {"operation", "dialect", "sql", "max_rows"}
+        return {k: v for k, v in args.items() if k in allowed_params}
+
     return args
 
 
@@ -576,9 +580,9 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
         content = m.get("content", "")
         # convert to System/Human/Assistant roles for your LLM client
         if role == "assistant":
-            messages_for_llm.append(HumanMessage(content=f"(assistant) {content}"))
+            messages_for_llm.append(AIMessage(content=content))
         else:
-            messages_for_llm.append(HumanMessage(content=f"(user) {content}"))
+            messages_for_llm.append(HumanMessage(content=content))
 
     system_prompt = (
         "You are a helpful database assistant. Generate a brief, natural response "
@@ -856,6 +860,32 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - Use 'operation': 'read' for raw call log data\n"
     "   - Any query related to call logs, agent performance, or customer service metrics\n\n"
 
+    """"
+    **GENERAL CHAT FALLBACK (IMPORTANT):**
+    - If the user's request is NOT about using any database or tool (e.g., "what preprocessing steps should I use?", "what tools can I use?"), respond with:
+      {"tool": null, "action": "chat", "args": {}}
+
+    **RAW SQL EXECUTION (READ-ONLY):**
+    - If the user provides a SQL query starting with SELECT (or asks to "run this SELECT"):
+      Use the `read_only_sql` tool with:
+      {"tool": "read_only_sql", "action": "execute", "args": {"dialect": "<mysql|postgres>", "sql": "<the query>"}}
+    - Choose dialect by context:
+      - Tables like `sales`, `customers`, `care_plan`, `call_logs` → "mysql"
+      - Tables like `products` → "postgres"
+
+      **HUMAN DDL COMMANDS → SAFE EXECUTION:**
+    - For “create copy of table” (or "duplicate"/"copy" table): 
+      {"tool": "safe_sql_executor", "action": "copy_table", "args": {"source_table": "<src>", "dest_table": "<dest>"}}
+    - For “create table X like Y”:
+      {"tool": "safe_sql_executor", "action": "create_like", "args": {"source_table": "<Y>", "dest_table": "<X>"}}
+    - For “drop table Z”:
+      {"tool": "safe_sql_executor", "action": "drop_table", "args": {"source_table": "Z"}}
+
+    **IF YOU ARE UNSURE:**
+    - Prefer {"tool": null, "action": "chat", "args": {}}  rather than choosing the wrong tool.
+    """"
+
+    
     "**ENHANCED CARE PLAN FIELD MAPPING:**\n"
     "The CarePlan table now includes comprehensive real-world fields:\n"
     "- Base: 'actual_release_date', 'name_of_youth', 'race_ethnicity', 'medi_cal_id_number'\n"
@@ -982,6 +1012,19 @@ Respond with the exact JSON format with properly extracted parameters."""
             except:
                 result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
 
+        if result.get("tool") == "read_only_sql":
+            args = result.setdefault("args", {})
+            if "dialect" not in args:
+                qlow = (args.get("sql","") or "").lower()
+                if any(t in qlow for t in [" products ", " from products", " join products"]):
+                    args["dialect"] = "postgres"
+                else:
+                    args["dialect"] = "mysql"
+            result["args"] = args
+
+        if result.get("action") == "chat":
+            return result
+            
         # Normalize action names
         if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
             result["action"] = "read"
@@ -1639,15 +1682,21 @@ if application == "MCP Application":
                 "Answer conversational questions naturally, "
                 "and use prior chat history and schema context if helpful."
             )
+            
+                # history
+                history = st.session_state.get("messages", [])[-10:]
+                prior_msgs = []
+                for m in history:
+                    if m.get("role") == "assistant":
+                        prior_msgs.append(AIMessage(content=m.get("content","")))
+                    else:
+                        prior_msgs.append(HumanMessage(content=m.get("content","")))
                 schema_context = json.dumps(st.session_state.get("schemas", {}), indent=2)
-                user_prompt = f"""
-                User asked: "{user_query}"
-                Known schemas: {schema_context}
-                Previous conversation: {st.session_state.get("messages", [])[-5:]}
-                """
+                user_msg = HumanMessage(content=f'{user_query}\n\n(You may use these schemas if relevant)\n{schema_context}')
 
+                
                 try:
-                    messages = [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)]
+                    messages = [SystemMessage(content=system_prompt)] + prior_msgs + [user_msg]
                     response = groq_client.invoke(messages)
                     response_text = response.content.strip()
                 except Exception as e:
@@ -1656,45 +1705,9 @@ if application == "MCP Application":
                 # Append chat messages
                 st.session_state.messages.append({"role": "user", "content": user_query})
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
-
                 st.write(response_text)
-
-            else:
-                # Normal tool-based flow
-                if tool not in enabled_tools:
-                    raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
-                if tool not in st.session_state.available_tools:
-                    raise Exception(
-                        f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}"
-                    )
-
-
-                # VALIDATE AND CLEAN PARAMETERS
-                args = validate_and_clean_parameters(tool, args)
-                args = normalize_args(args)
-                p["args"] = args
-
-                result = call_mcp_tool(tool, action, args)
-                response_text = generate_llm_response(result, action, tool, user_query)
-
-                # Append tool messages
-                st.session_state.messages.append({"role": "user", "content": user_query})
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": response_text,
-                    "request": {"tool": tool, "action": action, "args": args},
-                })
-
-                st.write(response_text)
-
-                # Auto-visualize only for read results with data
-                if action == "read" and isinstance(result.get("result"), list) and len(result["result"]) > 0:
-                    viz_html, viz_code = generate_visualization(result["result"], user_query, tool)
-                    st.session_state.visualizations.append((viz_html, viz_code, user_query))
-
-        except Exception as e:
-            st.error(f"Error: {e}")
-
+                return 
+                
             # ========== ENHANCED NAME-BASED RESOLUTION ==========
             
             # For SQL Server (customers) operations
