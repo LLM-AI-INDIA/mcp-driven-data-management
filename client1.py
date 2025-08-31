@@ -860,30 +860,28 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - Use 'operation': 'read' for raw call log data\n"
     "   - Any query related to call logs, agent performance, or customer service metrics\n\n"
 
-    """"
-    **GENERAL CHAT FALLBACK (IMPORTANT):**
-    - If the user's request is NOT about using any database or tool (e.g., "what preprocessing steps should I use?", "what tools can I use?"), respond with:
-      {"tool": null, "action": "chat", "args": {}}
+    "**GENERAL CHAT FALLBACK (IMPORTANT):**\n"
+    "- If the user's request is NOT about using any database or tool (e.g., "what preprocessing steps should I use?", "what tools can I use?"), respond with:\n"
+      "{"tool": null, "action": "chat", "args": {}}\n"
 
-    **RAW SQL EXECUTION (READ-ONLY):**
-    - If the user provides a SQL query starting with SELECT (or asks to "run this SELECT"):
-      Use the `read_only_sql` tool with:
-      {"tool": "read_only_sql", "action": "execute", "args": {"dialect": "<mysql|postgres>", "sql": "<the query>"}}
-    - Choose dialect by context:
-      - Tables like `sales`, `customers`, `care_plan`, `call_logs` → "mysql"
-      - Tables like `products` → "postgres"
+    "**RAW SQL EXECUTION (READ-ONLY):**\n"
+    "- If the user provides a SQL query starting with SELECT (or asks to "run this SELECT"):\n"
+      "Use the `read_only_sql` tool with:\n"
+      "{"tool": "read_only_sql", "action": "execute", "args": {"dialect": "<mysql|postgres>", "sql": "<the query>"}}\n"
+    "- Choose dialect by context:\n"
+      "- Tables like `sales`, `customers`, `care_plan`, `call_logs` → "mysql"\n"
+      "- Tables like `products` → "postgres"\n"
 
-      **HUMAN DDL COMMANDS → SAFE EXECUTION:**
-    - For “create copy of table” (or "duplicate"/"copy" table): 
-      {"tool": "safe_sql_executor", "action": "copy_table", "args": {"source_table": "<src>", "dest_table": "<dest>"}}
-    - For “create table X like Y”:
-      {"tool": "safe_sql_executor", "action": "create_like", "args": {"source_table": "<Y>", "dest_table": "<X>"}}
-    - For “drop table Z”:
-      {"tool": "safe_sql_executor", "action": "drop_table", "args": {"source_table": "Z"}}
+      "**HUMAN DDL COMMANDS → SAFE EXECUTION:**\n"
+    "- For “create copy of table” (or "duplicate"/"copy" table): \n"
+      "{"tool": "safe_sql_executor", "action": "copy_table", "args": {"source_table": "<src>", "dest_table": "<dest>"}}\n"
+    "- For “create table X like Y”:\n"
+      "{"tool": "safe_sql_executor", "action": "create_like", "args": {"source_table": "<Y>", "dest_table": "<X>"}}\n"
+    "- For “drop table Z”:\n"
+      "{"tool": "safe_sql_executor", "action": "drop_table", "args": {"source_table": "Z"}}\n"
 
-    **IF YOU ARE UNSURE:**
-    - Prefer {"tool": null, "action": "chat", "args": {}}  rather than choosing the wrong tool.
-    """"
+    "**IF YOU ARE UNSURE:**\n"
+    "- Prefer {"tool": null, "action": "chat", "args": {}}  rather than choosing the wrong tool.\n"
 
     
     "**ENHANCED CARE PLAN FIELD MAPPING:**\n"
