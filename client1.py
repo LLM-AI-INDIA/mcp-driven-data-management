@@ -1704,7 +1704,7 @@ if application == "MCP Application":
                 st.session_state.messages.append({"role": "user", "content": user_query})
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 st.write(response_text)
-                return 
+                st.stop()
                 
             # ========== ENHANCED NAME-BASED RESOLUTION ==========
             
