@@ -474,19 +474,55 @@ def _clean_json(raw: str) -> str:
     return json_match.group(0).strip() if json_match else raw.strip()
 
 import requests
-def call_mcp_tool(tool_name: str, operation: str, args: dict) -> dict:
-    """
-    Synchronous helper that calls the MCP server REST endpoint for a tool.
-    Adjust URL/path depending on your FastMCP HTTP transport.
-    """
-    url = st.session_state.get("MCP_SERVER_URL", "http://localhost:8000") + f"/call_tool"
-    payload = {"tool": tool_name, "operation": operation, "args": args}
+def call_mcp_tool(tool: str, action: str, args: dict) -> any:
     try:
-        resp = requests.post(url, json=payload, timeout=15)
-        resp.raise_for_status()
-        return resp.json()
+        result = asyncio.run(_invoke_tool(tool, action, args))
+        
+        # Debug: Check what we're getting back
+        print(f"DEBUG - Tool: {tool}, Action: {action}")
+        print(f"DEBUG - Result type: {type(result)}")
+        if isinstance(result, dict):
+            print(f"DEBUG - Result keys: {list(result.keys())}")
+        
+        # If we get a SQL string instead of results, it means the tool didn't execute properly
+        if isinstance(result, dict) and "sql" in result and ("result" not in result or result["result"] is None):
+            # This suggests the tool returned the SQL but didn't execute it
+            # Let's try to execute it using the read_only_sql tool
+            sql_query = result["sql"]
+            
+            # Determine the dialect based on the tool
+            if tool == "postgresql_crud":
+                dialect = "postgres"
+            else:
+                dialect = "mysql"  # Default for sales, sqlserver, calllogs, etc.
+            
+            # Execute the SQL directly
+            try:
+                sql_result = call_mcp_tool("read_only_sql", "execute", {
+                    "dialect": dialect,
+                    "sql": sql_query,
+                    "max_rows": 1000
+                })
+                
+                # Return the actual results
+                if isinstance(sql_result, dict) and "result" in sql_result:
+                    return {
+                        "sql": sql_query,  # Keep the SQL for display
+                        "result": sql_result["result"]  # Add the actual results
+                    }
+            except Exception as sql_error:
+                return {
+                    "sql": sql_query,
+                    "result": f"❌ Error executing SQL: {sql_error}"
+                }
+        
+        return result
+        
     except Exception as e:
-        return {"sql": None, "result": f"❌ error calling MCP tool: {e}"}
+        return {
+            "sql": None,
+            "result": f"❌ Error calling MCP tool {tool}: {str(e)}"
+        }
 
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
@@ -1834,19 +1870,28 @@ if application == "MCP Application":
                     viz_data = raw["result"]
                 
                 # Generate visualization for read operations with data
-                if action == "read" and viz_data and (
-                    (isinstance(viz_data, list) and len(viz_data) > 0) or 
-                    (isinstance(viz_data, dict) and len(viz_data) > 0)
-                ):
-                    with st.spinner("Generating visualization..."):
-                        viz_code, viz_html = generate_visualization(viz_data, user_query, tool)
-    
-                    # Add to visualization list with both code and HTML
-                    if "visualizations" not in st.session_state:
-                        st.session_state.visualizations = []                    
-                    st.session_state.visualizations.append((viz_html, viz_code, user_query))
-    
-                    st.success("Visualization generated successfully!")
+                if action == "read" and viz_data:
+                    # Handle different data formats
+                    actual_data = None
+                    
+                    if isinstance(viz_data, dict) and "result" in viz_data:
+                        actual_data = viz_data["result"]  # This is the actual data
+                    elif isinstance(viz_data, (list, dict)):
+                        actual_data = viz_data
+                    
+                    if actual_data and (
+                        (isinstance(actual_data, list) and len(actual_data) > 0) or 
+                        (isinstance(actual_data, dict) and len(actual_data) > 0)
+                    ):
+                        with st.spinner("Generating visualization..."):
+                            viz_code, viz_html = generate_visualization(actual_data, user_query, tool)
+                
+                        # Add to visualization list with both code and HTML
+                        if "visualizations" not in st.session_state:
+                            st.session_state.visualizations = []                    
+                        st.session_state.visualizations.append((viz_html, viz_code, user_query))
+                
+                        st.success("Visualization generated successfully!")
                 
                 st.session_state.messages.append({
                     "role": "user",
