@@ -617,10 +617,10 @@ Please respond naturally and reference prior conversation context where helpful.
 # ========== VISUALIZATION GENERATOR ==========
 def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     """
-    Generate JavaScript visualization code based on data and query
-    Returns tuple of (HTML/JS code for the visualization, raw code)
+    Generate JavaScript visualization code based on data and query.
+    Streams code live while generating, then renders.
+    Returns tuple of (HTML/JS code for the visualization, raw code).
     """
-    
     # Prepare context for the LLM
     context = {
         "user_query": user_query,
@@ -628,7 +628,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
         "data_type": type(data).__name__,
         "data_sample": data[:5] if isinstance(data, list) and len(data) > 0 else data
     }
-    
+
     system_prompt = """
     You are a JavaScript visualization expert. Generate interactive charts using Chart.js.
     Analyze the data structure and user query to determine the most appropriate visualization. Make it aesthetic and informative.
@@ -644,7 +644,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     8. Use container div with fixed height and overflow: auto
     9. Add 'chart-container' class to all chart containers
     """
-    
+
     user_prompt = f"""
     Create an interactive visualization for this data:
     
@@ -657,17 +657,30 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     Focus on the most important insights from the query.
     Make sure charts have fixed heights and don't overflow.
     """
-    
+
     try:
+        # Prepare messages
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        response = groq_client.invoke(messages)
-        visualization_code = response.content.strip()
-        
+
+        # Placeholder to show live code generation
+        placeholder = st.empty()
+        code_accum = ""
+
+        # Stream response tokens
+        for event in groq_client.stream(messages):
+            token = getattr(event, "content", "")
+            if token:
+                code_accum += token
+                placeholder.code(code_accum, language="html")
+
+        visualization_code = code_accum.strip()
+
         # Return both the code and the rendered HTML
         return visualization_code, visualization_code
+
     except Exception as e:
         # Fallback to a simple table if visualization generation fails
         if isinstance(data, list) and len(data) > 0:
@@ -1510,6 +1523,7 @@ if application == "MCP Application":
             )
     
     # Render saved visualizations (most recent first)
+    # Auto-render saved visualizations (newest first)
     if st.session_state.get("visualizations"):
         st.markdown("### Visualizations")
 
@@ -1517,7 +1531,7 @@ if application == "MCP Application":
             # First (newest) one stays expanded, others collapsed
             expanded_state = True if idx == 0 else False
 
-            with st.expander(f"📊 Visualization for: {q}", expanded=expanded_state):
+            with st.expander(f"📊 Visualization for: {q}", expanded=False):
                 st.markdown("**Generated Code:**")
                 st.code(viz_code, language="python")
 
@@ -1526,6 +1540,7 @@ if application == "MCP Application":
                     components.html(viz_html, height=420, scrolling=True)
                 except Exception as e:
                     st.error(f"Error rendering visualization: {e}")
+
 
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
@@ -1536,7 +1551,7 @@ if application == "MCP Application":
 
         for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
             with st.expander(
-                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=True):
+                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=False):
 
             # Create tabs with Code first, then Visualization
                 tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
