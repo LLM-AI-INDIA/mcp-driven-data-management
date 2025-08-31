@@ -372,7 +372,7 @@ with st.sidebar:
         st.button("Clear/Reset", key="clear_button")
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
-    logo_base64 = get_image_base64("Picture1.png")
+    logo_base64 = get_image_base64("llm.png")
     st.markdown(
     f"""
     <div class="sidebar-logo-row">
