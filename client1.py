@@ -485,21 +485,23 @@ def is_sql_command(text):
         'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter',
         'table', 'database', 'view', 'index', 'procedure', 'function',
         'join', 'union', 'where', 'from', 'into', 'values', 'set',
-        'grant', 'revoke', 'commit', 'rollback', 'truncate'
+        'grant', 'revoke', 'commit', 'rollback', 'truncate', 'explain',
+        'describe', 'show', 'use', 'begin', 'end', 'transaction'
     ]
     
     text_lower = text.lower()
     
-    # Check for SQL keywords
-    has_sql_keyword = any(keyword in text_lower for keyword in sql_keywords)
+    # Check for SQL keywords at the beginning of the query
+    first_word = text_lower.split()[0] if text_lower.split() else ""
+    is_sql_start = first_word in sql_keywords
     
-    # Check for SQL-like patterns (semicolons, parentheses, etc.)
-    has_sql_patterns = any(char in text for char in [';', '(', ')', '*'])
+    # Check for SQL-like patterns
+    has_sql_patterns = any(char in text for char in [';', '(', ')', '*', '`'])
     
     # Check for table/column references
-    has_table_references = any(term in text_lower for term in ['from', 'table', 'into'])
+    has_table_references = any(term in text_lower for term in ['from', 'table', 'into', 'database'])
     
-    return has_sql_keyword and (has_sql_patterns or has_table_references)
+    return is_sql_start or (has_sql_patterns and has_table_references)
 
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
@@ -509,7 +511,7 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
     # Add sql_executor to the validation function
     if tool_name == "sql_executor":
         allowed_params = {
-            'sql_command', 'query', 'statement', 'explain', 'analyze'
+            'command', 'sql_command', 'query', 'statement', 'explain', 'analyze'
         }
         return {k: v for k, v in args.items() if k in allowed_params}
 
@@ -843,7 +845,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
             "tool": "sql_executor",
             "action": "execute",
             "args": {
-                "sql_command": query
+                "command": query  # Changed from sql_command to command
             }
         }
     
@@ -1254,28 +1256,33 @@ if application == "MCP Application":
     
     # ========== TOOLS STATUS AND REFRESH BUTTON ==========
     # Create columns for tools info and refresh button
-    col1, col2 = st.columns([4, 1])
-
-    with col1:
+    try:
+    # Some code here
+        col1, col2 = st.columns([4, 1])
+    
+        with col1:
         # Display discovered tools info
-        if st.session_state.available_tools:
-            st.info(
-                f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
-        else:
-            st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
+            if st.session_state.available_tools:
+                st.info(
+                    f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
+            else:
+                st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
 
-    with col2:
+        with col2:
         # Small refresh button on main page
-        st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
-        if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
-            with st.spinner("Refreshing tools..."):
-                MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
-                st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
-                discovered_tools = discover_tools()
-                st.session_state.available_tools = discovered_tools
-                st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
-                st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
+            if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
+                with st.spinner("Refreshing tools..."):
+                    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+                    st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
+                    discovered_tools = discover_tools()
+                    st.session_state.available_tools = discovered_tools
+                    st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error(f"Error in tool discovery: {e}")
 
     # ========== 1. RENDER CHAT MESSAGES ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
