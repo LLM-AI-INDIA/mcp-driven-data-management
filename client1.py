@@ -477,10 +477,42 @@ def _clean_json(raw: str) -> str:
     json_match = re.search(r'\{.*\}', raw, re.DOTALL)
     return json_match.group(0).strip() if json_match else raw.strip()
 
+def is_sql_command(text):
+    """
+    Detect if the text is likely a SQL command
+    """
+    sql_keywords = [
+        'select', 'insert', 'update', 'delete', 'create', 'drop', 'alter',
+        'table', 'database', 'view', 'index', 'procedure', 'function',
+        'join', 'union', 'where', 'from', 'into', 'values', 'set',
+        'grant', 'revoke', 'commit', 'rollback', 'truncate'
+    ]
+    
+    text_lower = text.lower()
+    
+    # Check for SQL keywords
+    has_sql_keyword = any(keyword in text_lower for keyword in sql_keywords)
+    
+    # Check for SQL-like patterns (semicolons, parentheses, etc.)
+    has_sql_patterns = any(char in text for char in [';', '(', ')', '*'])
+    
+    # Check for table/column references
+    has_table_references = any(term in text_lower for term in ['from', 'table', 'into'])
+    
+    return has_sql_keyword and (has_sql_patterns or has_table_references)
+
 
 # ========== PARAMETER VALIDATION FUNCTION ==========
 def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
     """Validate and clean parameters for specific tools"""
+    
+    # Add sql_executor to the validation function
+    if tool_name == "sql_executor":
+        allowed_params = {
+            'sql_command', 'query', 'statement', 'explain', 'analyze'
+        }
+        return {k: v for k, v in args.items() if k in allowed_params}
+
     
     # Add careplan_crud to the validation function
     if tool_name == "careplan_crud":
@@ -569,6 +601,20 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
 # ========== NEW LLM RESPONSE GENERATOR ==========
 def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
     """Generate LLM response based on operation result with context"""
+    
+    # Add sql_executor-specific responses
+    if tool == "sql_executor":
+        if isinstance(operation_result, dict) and "result" in operation_result:
+            if isinstance(operation_result["result"], list):
+                count = len(operation_result["result"])
+                return f"Executed SQL command successfully. Returned {count} rows."
+            else:
+                return f"Executed SQL command successfully. {operation_result.get('message', 'Operation completed.')}"
+        elif isinstance(operation_result, str):
+            return f"SQL execution result: {operation_result}"
+        else:
+            return "SQL command executed successfully."
+
     
     # Add careplan-specific responses
     if tool == "careplan_crud":
@@ -787,10 +833,20 @@ st.markdown("""
 
 
 
-
+# ========== MODIFIED PARSE_USER_QUERY FUNCTION ==========
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with careplan support"""
-
+    """Enhanced parse user query with SQL command detection"""
+    
+    # First check if this is a direct SQL command
+    if is_sql_command(query):
+        return {
+            "tool": "sql_executor",
+            "action": "execute",
+            "args": {
+                "sql_command": query
+            }
+        }
+    
     if not available_tools:
         return {"error": "No tools available"}
 
@@ -807,15 +863,17 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     "RESPONSE FORMAT:\n"
     "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
-
+    
     "ACTION MAPPING:\n"
     "- 'read': for viewing, listing, showing, displaying, or getting records\n"
     "- 'create': for adding, inserting, or creating NEW records\n"
     "- 'update': for modifying, changing, or updating existing records\n"
     "- 'delete': for removing, deleting, or destroying records\n"
     "- 'describe': for showing table structure, schema, or column information\n"
-    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n\n"
+    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n"
+    "- 'execute': for direct SQL command execution (sql_executor only)\n\n"
 
+    
     "CRITICAL TOOL SELECTION RULES:\n"
     "\n"
     "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
@@ -834,6 +892,12 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "- Health: 'health_screenings', 'health_assessments', 'chronic_conditions', 'prescribed_medications'\n"
     "- Incarceration: 'release_date' (previously 'actual_release_date'), 'care_plan_notes' (progress during incarceration)\n"
     "- Metadata: 'createdat', 'updatedat'\n\n"
+
+    "6. **DIRECT SQL COMMANDS** → Use 'sql_executor':\n"
+    "   - Any query that looks like raw SQL (CREATE TABLE, SELECT, INSERT, etc.)\n"
+    "   - Database administration commands\n"
+    "   - Complex queries that don't fit other tools\n"
+    "   - Use 'action': 'execute' for all SQL commands\n\n"
 
     "**CARE PLAN COLUMN FILTERING:**\n"
     "   - If the user asks to 'show only name and chronic conditions', 'remove address', or 'exclude phone'.\n"
@@ -1141,6 +1205,14 @@ if application == "MCP Application":
 
             p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
+            
+            # Handle SQL executor even if not in available tools
+            if tool == "sql_executor" and tool not in st.session_state.available_tools:
+                # Add sql_executor to available tools if it doesn't exist
+                st.session_state.available_tools["sql_executor"] = "Direct SQL command execution"
+                if tool not in st.session_state.tool_states:
+                    st.session_state.tool_states[tool] = True
+            
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
             if tool not in st.session_state.available_tools:
@@ -1155,12 +1227,13 @@ if application == "MCP Application":
             args = normalize_args(args)
             p["args"] = args
 
-            # Add conversation history to the request for careplan operations
-            if tool == "careplan_crud" and st.session_state.conversation_history:
-                args["conversation_context"] = st.session_state.conversation_history[-5:]  # Last 5 messages
-            
-            # Update the parsed args
-            p["args"] = args
+            # For SQL executor, pass the raw SQL command directly
+            if tool == "sql_executor" and "sql_command" in args:
+                # Extract the SQL command and send it as-is
+                sql_command = args["sql_command"]
+                # Remove the sql_command from args to avoid duplication
+                args = {"command": sql_command}
+                p["args"] = args
 
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
             
@@ -1622,10 +1695,21 @@ if application == "MCP Application":
             })
             for step in user_steps:
                 st.session_state.messages.append(step)
-            if isinstance(raw, dict) and "sql" in raw and "result" in raw:
-                reply, fmt = raw, "sql_crud"
+                
+            # Handle SQL executor responses differently
+            if tool == "sql_executor":
+                if isinstance(raw, dict) and "sql" in raw and "result" in raw:
+                    reply, fmt = raw, "sql_crud"
+                elif isinstance(raw, dict) and "message" in raw:
+                    reply, fmt = raw["message"], "text"
+                else:
+                    reply, fmt = format_natural(raw), "text"
             else:
-                reply, fmt = format_natural(raw), "text"
+                if isinstance(raw, dict) and "sql" in raw and "result" in raw:
+                    reply, fmt = raw, "sql_crud"
+                else:
+                    reply, fmt = format_natural(raw), "text"
+                    
             assistant_message = {
                 "role": "assistant",
                 "content": reply,
@@ -1634,11 +1718,12 @@ if application == "MCP Application":
                 "tool": p.get("tool"),
                 "action": p.get("action"),
                 "args": p.get("args"),
-                "user_query": user_query,  # Added user_query to the message
+                "user_query": user_query,
             }
             st.session_state.messages.append(assistant_message)
         st.rerun()  # Rerun so chat output appears
 
+        
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
     components.html("""
         <script>
