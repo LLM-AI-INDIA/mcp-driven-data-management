@@ -1663,6 +1663,7 @@ if application == "MCP Application":
     if user_query_input and send_clicked:
         user_query = user_query_input
         user_steps = []
+        result = None
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
             if not enabled_tools:
@@ -1705,6 +1706,22 @@ if application == "MCP Application":
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
                 st.write(response_text)
                 st.stop()
+
+            if tool:
+                result = mcp_call(tool, args)  
+
+            if result is not None:
+                if isinstance(result, dict) and "sql" in result and "result" in result:
+                    reply, fmt = result, "sql_crud"
+                else:
+                    reply, fmt = format_natural(result), "text"
+
+                st.session_state.messages.append({"role": "user", "content": user_query})
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+                st.write(reply)
+        
+        except Exception as e:
+            st.error(f"Error: {e}")
                 
             # ========== ENHANCED NAME-BASED RESOLUTION ==========
             
