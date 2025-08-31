@@ -1225,64 +1225,6 @@ if application == "MCP Application":
     except Exception as e:
         st.error(f"Error in tool discovery: {e}")
 
-    # ========== PROCESS CHAT INPUT ==========
-    if user_query_input and send_clicked:
-        user_query = user_query_input
-        user_steps = []
-        try:
-            enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
-            if not enabled_tools:
-                raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
-
-            p = parse_user_query(user_query, st.session_state.available_tools)
-            tool = p.get("tool")
-            
-            # Handle SQL executor even if not in available tools
-            if tool == "sql_executor" and tool not in st.session_state.available_tools:
-                # Add sql_executor to available tools if it doesn't exist
-                st.session_state.available_tools["sql_executor"] = "Direct SQL command execution"
-                if tool not in st.session_state.tool_states:
-                    st.session_state.tool_states[tool] = True
-            
-            if tool not in enabled_tools:
-                raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
-            if tool not in st.session_state.available_tools:
-                raise Exception(
-                    f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}")
-
-            action = p.get("action")
-            args = p.get("args", {})
-
-            # VALIDATE AND CLEAN PARAMETERS
-            args = validate_and_clean_parameters(tool, args)
-            args = normalize_args(args)
-            p["args"] = args
-
-            # For SQL executor, pass the raw SQL command directly
-            if tool == "sql_executor" and "sql_command" in args:
-                # Extract the SQL command and send it as-is
-                sql_command = args["sql_command"]
-                # Remove the sql_command from args to avoid duplication
-                args = {"command": sql_command}
-                p["args"] = args
-
-            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
-            
-            # Update conversation history
-            st.session_state.conversation_history.append({
-                "role": "user", 
-                "content": user_query,
-                "tool": tool,
-                "action": action
-            })
-            
-            if isinstance(raw, dict) and "response" in raw:
-                st.session_state.conversation_history.append({
-                    "role": "assistant",
-                    "content": raw.get("response", ""),
-                    "data": raw.get("data")
-                })
-                
     # ========== 1. RENDER CHAT MESSAGES ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
     for msg in st.session_state.messages:
@@ -1507,6 +1449,7 @@ if application == "MCP Application":
             for key in keys_to_remove:
                 del st.session_state[key]
             st.rerun()
+
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
@@ -1562,6 +1505,14 @@ if application == "MCP Application":
 
             p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
+            
+            # Handle SQL executor even if not in available tools
+            if tool == "sql_executor" and tool not in st.session_state.available_tools:
+                # Add sql_executor to available tools if it doesn't exist
+                st.session_state.available_tools["sql_executor"] = "Direct SQL command execution"
+                if tool not in st.session_state.tool_states:
+                    st.session_state.tool_states[tool] = True
+            
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
             if tool not in st.session_state.available_tools:
@@ -1576,88 +1527,30 @@ if application == "MCP Application":
             args = normalize_args(args)
             p["args"] = args
 
-            # ========== ENHANCED NAME-BASED RESOLUTION ==========
-            
-            # For SQL Server (customers) operations
-            if tool == "sqlserver_crud":
-                if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
-                    # First, try to find the customer by name
-                    name_to_find = args["name"]
-                    try:
-                        # Search for customer by name
-                        read_result = call_mcp_tool(tool, "read", {})
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            customers = read_result["result"]
-                            # Try exact match first
-                            exact_matches = [c for c in customers if c.get("Name", "").lower() == name_to_find.lower()]
-                            if exact_matches:
-                                args["customer_id"] = exact_matches[0]["Id"]
-                            else:
-                                # Try partial matches (first name or last name)
-                                partial_matches = [c for c in customers if 
-                                    name_to_find.lower() in c.get("Name", "").lower() or
-                                    name_to_find.lower() in c.get("FirstName", "").lower() or 
-                                    name_to_find.lower() in c.get("LastName", "").lower()]
-                                if partial_matches:
-                                    args["customer_id"] = partial_matches[0]["Id"]
-                                else:
-                                    raise Exception(f"❌ Customer '{name_to_find}' not found")
-                    except Exception as e:
-                        if "not found" in str(e):
-                            raise e
-                        else:
-                            raise Exception(f"❌ Error finding customer '{name_to_find}': {str(e)}")
-
-                # Extract new email for updates
-                if action == "update" and "new_email" not in args:
-                    possible_email = extract_email(user_query)
-                    if possible_email:
-                        args["new_email"] = possible_email
-
-            # For PostgreSQL (products) operations  
-            elif tool == "postgresql_crud":
-                if action in ["update", "delete"] and "name" in args and "product_id" not in args:
-                    # First, try to find the product by name
-                    name_to_find = args["name"]
-                    try:
-                        # Search for product by name
-                        read_result = call_mcp_tool(tool, "read", {})
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            products = read_result["result"]
-                            # Try exact match first
-                            exact_matches = [p for p in products if p.get("name", "").lower() == name_to_find.lower()]
-                            if exact_matches:
-                                args["product_id"] = exact_matches[0]["id"]
-                            else:
-                                # Try partial matches
-                                partial_matches = [p for p in products if name_to_find.lower() in p.get("name", "").lower()]
-                                if partial_matches:
-                                    args["product_id"] = partial_matches[0]["id"]
-                                else:
-                                    raise Exception(f"❌ Product '{name_to_find}' not found")
-                    except Exception as e:
-                        if "not found" in str(e):
-                            raise e
-                        else:
-                            raise Exception(f"❌ Error finding product '{name_to_find}': {str(e)}")
-
-                # Extract new price for updates
-                if action == "update" and "new_price" not in args:
-                    possible_price = extract_price(user_query)
-                    if possible_price is not None:
-                        args['new_price'] = possible_price
-
-            # Update the parsed args
-            p["args"] = args
-
-            # Handle describe operations
-            if action == "describe" and "table_name" in args:
-                if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
-                    args["table_name"] = "Customers"
-                if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
-                    args["table_name"] = "products"
+            # For SQL executor, pass the raw SQL command directly
+            if tool == "sql_executor" and "sql_command" in args:
+                # Extract the SQL command and send it as-is
+                sql_command = args["sql_command"]
+                # Remove the sql_command from args to avoid duplication
+                args = {"command": sql_command}
+                p["args"] = args
 
             raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
+            
+            # Update conversation history
+            st.session_state.conversation_history.append({
+                "role": "user", 
+                "content": user_query,
+                "tool": tool,
+                "action": action
+            })
+            
+            if isinstance(raw, dict) and "response" in raw:
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": raw.get("response", ""),
+                    "data": raw.get("data")
+                })
             
             # ========== GENERATE VISUALIZATION ==========
             # Extract data for visualization
@@ -1735,6 +1628,7 @@ if application == "MCP Application":
           setTimeout(() => { window.scrollTo(0, document.body.scrollHeight); }, 80);
         </script>
     """)
+
 
 # ========== ETL EXAMPLES HELP SECTION ==========
 with st.expander("🔧 ETL Functions & Examples"):
