@@ -1503,33 +1503,33 @@ if application == "MCP Application":
 
         for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
             with st.expander(
-                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}"):
-            
+                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=True):
+
             # Create tabs with Code first, then Visualization
                 tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
-            
+
                 with tab1:
                     st.markdown("**Generated Code**")
-                
+
                 # Initialize streaming state for this visualization if not exists
                     stream_key = f"stream_complete_{i}"
                     if stream_key not in st.session_state:
                         st.session_state[stream_key] = False
-                
+
                 # Create placeholder for streaming effect
                     code_placeholder = st.empty()
-                
+
                     if not st.session_state[stream_key]:
                     # Streaming effect - show code character by character
                         import time
-                    
+
                     # Show streaming indicator first
                         with code_placeholder.container():
                             st.info("🔄 Generating code...")
-                    
+
                     # Small delay to show the loading message
                         time.sleep(0.5)
-                    
+
                     # Stream the code
                         streamed_code = ""
                         for j, char in enumerate(viz_code):
@@ -1538,27 +1538,27 @@ if application == "MCP Application":
                             if j % 8 == 0 or j == len(viz_code) - 1:
                                 code_placeholder.code(streamed_code, language="html")
                                 time.sleep(0.03)  # Adjust speed as needed
-                    
+
                     # Mark streaming as complete
                         st.session_state[stream_key] = True
-                    
+
                     # Force a rerun to show the complete state
                         st.rerun()
                     else:
                     # Show complete code immediately
                         code_placeholder.code(viz_code, language="html")
-                
+
                 # Adding copy button (only show when streaming is complete)
                     if st.session_state[stream_key]:
                         if st.button("📋 Copy Code", key=f"copy_{i}"):
                             st.session_state.copied_code = viz_code
                             st.success("Code copied to clipboard!")
-                        
+
                     # Add reset streaming button for demo purposes
                         if st.button("🔄 Replay Code Generation", key=f"replay_{i}"):
                             st.session_state[stream_key] = False
                             st.rerun()
-            
+
                 with tab2:
                     st.markdown("**Interactive Visualization**")
                 # Use a container with fixed height
@@ -1572,7 +1572,6 @@ if application == "MCP Application":
             for key in keys_to_remove:
                 del st.session_state[key]
             st.rerun()
-
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
