@@ -478,43 +478,45 @@ def call_mcp_tool(tool: str, action: str, args: dict) -> any:
     try:
         result = asyncio.run(_invoke_tool(tool, action, args))
         
-        # Debug: Check what we're getting back
-        print(f"DEBUG - Tool: {tool}, Action: {action}")
-        print(f"DEBUG - Result type: {type(result)}")
-        if isinstance(result, dict):
-            print(f"DEBUG - Result keys: {list(result.keys())}")
-        
-        # If we get a SQL string instead of results, it means the tool didn't execute properly
-        if isinstance(result, dict) and "sql" in result and ("result" not in result or result["result"] is None):
-            # This suggests the tool returned the SQL but didn't execute it
-            # Let's try to execute it using the read_only_sql tool
+        # Check if we have SQL but no results
+        if (isinstance(result, dict) and "sql" in result and 
+            ("result" not in result or result["result"] is None)):
+            
             sql_query = result["sql"]
             
-            # Determine the dialect based on the tool
-            if tool == "postgresql_crud":
-                dialect = "postgres"
-            else:
-                dialect = "mysql"  # Default for sales, sqlserver, calllogs, etc.
-            
-            # Execute the SQL directly
-            try:
-                sql_result = call_mcp_tool("read_only_sql", "execute", {
-                    "dialect": dialect,
-                    "sql": sql_query,
-                    "max_rows": 1000
-                })
+            # First check if read_only_sql tool is available
+            if "read_only_sql" in st.session_state.available_tools:
+                # Determine dialect
+                dialect = "mysql"
+                if tool == "postgresql_crud":
+                    dialect = "postgres"
                 
-                # Return the actual results
-                if isinstance(sql_result, dict) and "result" in sql_result:
+                try:
+                    sql_result = call_mcp_tool("read_only_sql", "execute", {
+                        "dialect": dialect,
+                        "sql": sql_query,
+                        "max_rows": 1000
+                    })
+                    
+                    if isinstance(sql_result, dict) and "result" in sql_result:
+                        return {
+                            "sql": sql_query,
+                            "result": sql_result["result"]
+                        }
+                    else:
+                        return {
+                            "sql": sql_query,
+                            "result": "❌ SQL executed but no results returned"
+                        }
+                        
+                except Exception as sql_error:
                     return {
-                        "sql": sql_query,  # Keep the SQL for display
-                        "result": sql_result["result"]  # Add the actual results
+                        "sql": sql_query,
+                        "result": f"❌ Error executing SQL: {str(sql_error)}"
                     }
-            except Exception as sql_error:
-                return {
-                    "sql": sql_query,
-                    "result": f"❌ Error executing SQL: {sql_error}"
-                }
+            else:
+                # read_only_sql not available, return the SQL as is
+                return result
         
         return result
         
@@ -1731,6 +1733,21 @@ if application == "MCP Application":
             tool = p.get("tool")
             action = p.get("action")
             args = p.get("args", {})
+            
+            # DEBUG: Show what we're about to call
+            st.write(f"DEBUG: Calling tool '{tool}' with action '{action}' and args: {args}")
+            
+            if tool:
+                result = call_mcp_tool(tool, action, args)
+                
+            # DEBUG: Show what we got back
+            st.write(f"DEBUG: Result type: {type(result)}")
+            if isinstance(result, dict):
+                st.write(f"DEBUG: Result keys: {list(result.keys())}")
+                if "sql" in result:
+                    st.write(f"DEBUG: SQL: {result['sql']}")
+                if "result" in result:
+                    st.write(f"DEBUG: Result data: {result['result']}")
     
             # If this is a pure chat/fallback action
             if action == "chat":
