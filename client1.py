@@ -1196,6 +1196,35 @@ if application == "MCP Application":
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
 
+    # ========== TOOLS STATUS AND REFRESH BUTTON ==========
+    # Create columns for tools info and refresh button
+    try:
+        col1, col2 = st.columns([4, 1])
+    
+        with col1:
+            # Display discovered tools info
+            if st.session_state.available_tools:
+                st.info(
+                    f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
+            else:
+                st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
+
+        with col2:
+            # Small refresh button on main page
+            st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
+            if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
+                with st.spinner("Refreshing tools..."):
+                    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
+                    st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
+                    discovered_tools = discover_tools()
+                    st.session_state.available_tools = discovered_tools
+                    st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error(f"Error in tool discovery: {e}")
+
     # ========== PROCESS CHAT INPUT ==========
     if user_query_input and send_clicked:
         user_query = user_query_input
@@ -1253,37 +1282,7 @@ if application == "MCP Application":
                     "content": raw.get("response", ""),
                     "data": raw.get("data")
                 })
-    
-    # ========== TOOLS STATUS AND REFRESH BUTTON ==========
-    # Create columns for tools info and refresh button
-    try:
-    # Some code here
-        col1, col2 = st.columns([4, 1])
-    
-        with col1:
-        # Display discovered tools info
-            if st.session_state.available_tools:
-                st.info(
-                    f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
-            else:
-                st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
-
-        with col2:
-        # Small refresh button on main page
-            st.markdown('<div class="small-refresh-button">', unsafe_allow_html=True)
-            if st.button("🔄 Active Server", key="refresh_tools_main", help="Rediscover available tools"):
-                with st.spinner("Refreshing tools..."):
-                    MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8000")
-                    st.session_state["MCP_SERVER_URL"] = MCP_SERVER_URL
-                    discovered_tools = discover_tools()
-                    st.session_state.available_tools = discovered_tools
-                    st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-    except Exception as e:
-        st.error(f"Error in tool discovery: {e}")
-
+                
     # ========== 1. RENDER CHAT MESSAGES ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
     for msg in st.session_state.messages:
@@ -1730,7 +1729,6 @@ if application == "MCP Application":
             st.session_state.messages.append(assistant_message)
         st.rerun()  # Rerun so chat output appears
 
-        
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
     components.html("""
         <script>
