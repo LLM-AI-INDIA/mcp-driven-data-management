@@ -414,14 +414,14 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            MCP-Driven Data Management With Natural Language
+            Implementing the Model Context Protocol for Enterprise Data and Insights
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL 
+            MCP Unifies Data. Delivers Insights
         </span>
         <hr style="
         width: 80%;
