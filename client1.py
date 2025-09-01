@@ -22,7 +22,7 @@ if not GROQ_API_KEY:
 
 groq_client = ChatGroq(
     groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "moonshotai/kimi-k2-instruct")
+    model_name=os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 )
 
 # ========== PAGE CONFIG ==========
@@ -31,76 +31,6 @@ st.set_page_config(page_title="MCP CRUD Chat", layout="wide")
 # ========== GLOBAL CSS ==========
 st.markdown("""
     <style>
-    /* Floating visualization panel styles */
-    #floating-viz-container {
-        position: fixed;
-        right: 20px;
-        top: 80px;
-        width: 80%;
-        max-width: 1200px;
-        z-index: 9999;
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        transition: all 0.3s ease;
-    }
-    
-    #floating-viz-container .stButton button {
-        height: auto;
-        padding: 4px 8px;
-        font-size: 12px;
-        margin-bottom: 0;
-    }
-    
-    /* Fixed code section styles */
-    #fixed-code-container {
-        position: fixed;
-        left: 330px;
-        bottom: 100px; /* Position above the chat input */
-        width: calc(100% - 370px);
-        max-height: 40vh;
-        z-index: 9998;
-        background: white;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-        transition: all 0.3s ease;
-        overflow: auto;
-        display: none; /* Hidden by default */
-    }
-    
-    #fixed-code-container .code-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px 15px;
-        background: #f9f9f9;
-        border-bottom: 1px solid #e6e6e6;
-        border-radius: 12px 12px 0 0;
-    }
-    
-    #fixed-code-container .code-content {
-        padding: 15px;
-        max-height: calc(40vh - 50px);
-        overflow: auto;
-    }
-    
-    @media (max-width: 800px) {
-        #fixed-code-container {
-            left: 20px;
-            width: calc(100% - 40px);
-        }
-    }
-    
-    /* Make sure the floating panel stays above everything */
-    .streamlit-container {
-        z-index: auto !important;
-    }
-    
-    /* Ensure the chat input stays accessible */
-    .sticky-chatbar {
-        z-index: 10000 !important;
-    }
-    
     [data-testid="stSidebar"] {
         background: linear-gradient(180deg, #4286f4 0%, #397dd2 100%);
         color: #fff !important;
@@ -442,7 +372,7 @@ with st.sidebar:
         st.button("Clear/Reset", key="clear_button")
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
-    logo_base64 = get_image_base64("Picture1.png")
+    logo_base64 = get_image_base64("llm.png")
     st.markdown(
     f"""
     <div class="sidebar-logo-row">
@@ -457,7 +387,7 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-logo_path = "Picture1.png"
+logo_path = "llm.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
@@ -484,14 +414,14 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            MCP-Driven Data Management With Natural Language
+            Implementing the Model Context Protocol for Enterprise Data and Insights
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL 
+            MCP Unifies Data. Delivers Insights
         </span>
         <hr style="
         width: 80%;
@@ -509,12 +439,6 @@ st.markdown(
 # ========== SESSION STATE INIT ==========
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
-# Initialize conversation context memory
-# This stores previous user queries and assistant responses to provide context for future interactions
-# Format: List of tuples (user_query, assistant_response) with most recent conversations at the end
-if "conversation_context" not in st.session_state:
-    st.session_state.conversation_context = []
 
 # Initialize available_tools if not exists
 if "available_tools" not in st.session_state:
@@ -627,50 +551,22 @@ def validate_and_clean_parameters(tool_name: str, args: dict) -> dict:
 
 # ========== NEW LLM RESPONSE GENERATOR ==========
 def generate_llm_response(operation_result: dict, action: str, tool: str, user_query: str) -> str:
-    """Generate LLM response based on operation result with conversation context
-    
-    This function creates natural language responses to database operations with
-    awareness of previous conversation history. This enables more contextual and
-    coherent responses, especially for follow-up questions or references to
-    previous interactions.
-    
-    Args:
-        operation_result: Dictionary containing the result of the database operation
-        action: The action performed (read, create, update, delete, describe)
-        tool: The tool/database used for the operation
-        user_query: The original user query text
-        
-    Returns:
-        A natural language response explaining the operation result with context
-    """
+    """Generate LLM response based on operation result with context"""
 
-    # Get conversation context from session state
-    # This retrieves up to 3 previous conversation pairs to provide context
-    conversation_context = st.session_state.get("conversation_context", [])
-    
     # Prepare context for LLM
     context = {
         "action": action,
         "tool": tool,
         "user_query": user_query,
-        "operation_result": operation_result,
-        "conversation_context": conversation_context
+        "operation_result": operation_result
     }
 
     system_prompt = (
         "You are a helpful database assistant. Generate a brief, natural response "
         "explaining what operation was performed and its result. Be conversational "
-        "and informative. Focus on the business context and user-friendly explanation. "
-        "Maintain context from previous conversations when responding to follow-up questions."
+        "and informative. Focus on the business context and user-friendly explanation."
     )
 
-    # Format conversation context for the prompt
-    context_str = ""
-    if conversation_context:
-        context_str = "Previous conversation context:\n"
-        for i, (prev_query, prev_response) in enumerate(conversation_context[-3:]):
-            context_str += f"User: {prev_query}\nAssistant: {prev_response}\n\n"
-    
     user_prompt = f"""
     Based on this database operation context, generate a brief natural response:
 
@@ -678,11 +574,8 @@ def generate_llm_response(operation_result: dict, action: str, tool: str, user_q
     Operation: {action}
     Tool used: {tool}
     Result: {json.dumps(operation_result, indent=2)}
-    
-    {context_str}
 
     Generate a single line response explaining what was done and the outcome.
-    Consider previous conversation context when responding to follow-up or vague queries.
     """
 
     try:
@@ -737,9 +630,6 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     7. If data is complex, create multiple chart types (bar, line, pie) but limit to 2-5 charts
     8. Use container div with fixed height and overflow: auto
     9. Add 'chart-container' class to all chart containers
-    10. Use modern color schemes and styling for a professional look
-    11. Add hover effects and tooltips for better user interaction
-    12. Include a small legend or data summary where appropriate
     """
     
     user_prompt = f"""
@@ -753,67 +643,42 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     Generate a comprehensive visualization that helps understand the data.
     Focus on the most important insights from the query.
     Make sure charts have fixed heights and don't overflow.
-    Use modern, professional styling similar to Claude Desktop visualizations.
     """
     
     try:
-        # Create a placeholder for streaming visualization generation
-        placeholder = st.empty()
-        with placeholder.container():
-            st.info("🔄 Analyzing data and generating visualization...")
-        
-        # Prepare messages for LLM
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        
-        # Get response from LLM
         response = groq_client.invoke(messages)
         visualization_code = response.content.strip()
         
-        # Clear the placeholder
-        placeholder.empty()
-        
-        # Enhance the visualization with Claude Desktop-like styling
-        enhanced_code = f"""
-        <div style="font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); overflow: hidden;">
-            <div style="padding: 15px 20px; border-bottom: 1px solid #f0f0f0;">
-                <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #333;">Visualization: {user_query[:50] + '...' if len(user_query) > 50 else user_query}</h3>
-            </div>
-            <div style="padding: 20px;">
-                {visualization_code}
-            </div>
-        </div>
-        """
-        
         # Return both the code and the rendered HTML
-        return visualization_code, enhanced_code
+        return visualization_code, visualization_code
     except Exception as e:
         # Fallback to a simple table if visualization generation fails
         if isinstance(data, list) and len(data) > 0:
             fallback_code = f"""
-            <div class="visualization-container" style="height: 400px; overflow: auto; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-                <div class="visualization-title" style="font-weight: 600; margin-bottom: 15px; color: #333;">Data Table</div>
+            <div class="visualization-container" style="height: 400px; overflow: auto;">
+                <div class="visualization-title">Data Table</div>
                 <div id="table-container"></div>
             </div>
             <script>
                 const data = {json.dumps(data)};
-                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse; border-radius: 4px; overflow: hidden;">';
+                let tableHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
                 
                 // Add headers
                 tableHtml += '<tr>';
                 Object.keys(data[0]).forEach(key => {{
-                    tableHtml += `<th style="padding: 10px; background: #f7f7f7; font-weight: 600; text-align: left; border-bottom: 2px solid #eaeaea;">${{key}}</th>`;
+                    tableHtml += `<th style="padding: 8px; background: #f2f2f2;">${{key}}</th>`;
                 }});
                 tableHtml += '</tr>';
                 
                 // Add rows
-                data.forEach((row, index) => {{
-                    const rowStyle = index % 2 === 0 ? 'background: #ffffff;' : 'background: #f9f9f9;';
-                    tableHtml += `<tr style="${{rowStyle}}">`;
+                data.forEach(row => {{
+                    tableHtml += '<tr>';
                     Object.values(row).forEach(value => {{
-                        tableHtml += `<td style="padding: 8px 10px; border-bottom: 1px solid #eaeaea;">${{value !== null ? value : 'N/A'}}</td>`;
+                        tableHtml += `<td style="padding: 8px;">${{value}}</td>`;
                     }});
                     tableHtml += '</tr>';
                 }});
@@ -822,15 +687,14 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
                 document.getElementById('table-container').innerHTML = tableHtml;
             </script>
             """
-            return fallback_code, fallback_code
         else:
             fallback_code = f"""
-            <div class="visualization-container" style="height: 200px; overflow: auto; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-                <div class="visualization-title" style="font-weight: 600; margin-bottom: 15px; color: #333;">Result</div>
-                <p style="color: #555; line-height: 1.5;">{str(data)}</p>
+            <div class="visualization-container" style="height: 200px; overflow: auto;">
+                <div class="visualization-title">Result</div>
+                <p>{str(data)}</p>
             </div>
             """
-            return fallback_code, fallback_code
+        return fallback_code, fallback_code
 
 # Add this CSS for the split layout
 st.markdown("""
@@ -894,26 +758,10 @@ st.markdown("""
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with conversation context memory
-    
-    This function analyzes user queries with awareness of previous conversation context,
-    allowing it to better understand follow-up questions, references to previous entities,
-    and maintain continuity across multiple interactions.
-    
-    Args:
-        query: The current user query text
-        available_tools: Dictionary of available tools for processing
-        
-    Returns:
-        Dictionary with parsed query parameters including tool, action, and arguments
-    """
+    """Enhanced parse user query with better DELETE operation handling"""
 
     if not available_tools:
         return {"error": "No tools available"}
-        
-    # Get conversation context from session state
-    # This retrieves up to 5 previous conversation pairs to provide context
-    conversation_context = st.session_state.get("conversation_context", [])
 
     # Build comprehensive tool information for the LLM
     tool_info = []
@@ -922,7 +770,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
 
     tools_description = "\n".join(tool_info)
 
-    system_prompt = (
+    system_prompt = ("""
     "You are an intelligent database router for CRUD operations. "
     "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
 
@@ -978,35 +826,34 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - 'show calls by agent [AgentName]', 'calls with negative sentiment'\n"
     "   - 'call duration analysis', 'wait time statistics'\n"
     "   - 'top issue categories', 'service quality metrics'\n"
-    "   \n"
-    "   **NEW TRANSCRIPT ANALYSIS FEATURES:**\n"
-    "   - 'analyze call transcripts' → Use analysis_type: 'transcript_keywords'\n"
-    "   - 'find keywords in transcripts' → Use analysis_type: 'transcript_keywords'\n"
-    "   - 'sentiment from transcripts' → Use analysis_type: 'transcript_sentiment'\n"
-    "   - 'agent communication patterns' → Use analysis_type: 'agent_communication'\n"
-    "   - 'identify problem patterns' → Use analysis_type: 'problem_patterns'\n"
-    "   - 'search transcripts for [keyword]' → Use operation: 'transcript_search' with search_text\n"
-    "   - 'find calls mentioning [topic]' → Use operation: 'transcript_search' with search_text\n"
-    "   - 'calls about refunds' → Use operation: 'transcript_search' with search_text: 'refund'\n"
-    "   - 'frustrated customer calls' → Use operation: 'transcript_search' with search_text: 'frustrated angry upset'\n"
-    "   \n"
-    "   **Example Queries:**\n"
-    "   - 'analyze communication patterns of agents'\n"
-    "     → {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"agent_communication\"}}\n"
-    "   - 'find calls where customers mentioned billing problems'\n"
-    "     → {\"tool\": \"calllogs_crud\", \"action\": \"transcript_search\", \"args\": {\"search_text\": \"billing problems\"}}\n"
-    "   - 'show transcript keywords by issue category'\n"
-    "     → {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"transcript_keywords\"}}\n"
-    "   - 'identify recurring problems from transcripts'\n"
-    "     → {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"problem_patterns\"}}\n"
-    "   - 'sentiment analysis from call transcripts'\n"
-    "     → {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"transcript_sentiment\"}}\n"
-    "   \n"
-    "   Use 'operation': 'analyze' for analytical reports\n"
-    "   Use 'operation': 'read' for raw call log data with transcripts\n"
-    "   Use 'operation': 'transcript_search' for searching within transcripts\n"
-    "   Any query related to call logs, agent performance, customer service metrics, or transcript analysis\n\n"
+    "   - Use 'operation': 'analyze' for analytical reports\n"
+    "   - Use 'operation': 'read' for raw call log data\n"
+    "   - Any query related to call logs, agent performance, or customer service metrics\n\n"
 
+    "**GENERAL CHAT FALLBACK (IMPORTANT):**\n"
+    "- If the user's request is NOT about using any database or tool (e.g., "what preprocessing steps should I use?", "what tools can I use?"), respond with:\n"
+      "{"tool": null, "action": "chat", "args": {}}\n"
+
+    "**RAW SQL EXECUTION (READ-ONLY):**\n"
+    "- If the user provides a SQL query starting with SELECT (or asks to "run this SELECT"):\n"
+      "Use the `read_only_sql` tool with:\n"
+      "{"tool": "read_only_sql", "action": "execute", "args": {"dialect": "<mysql|postgres>", "sql": "<the query>"}}\n"
+    "- Choose dialect by context:\n"
+      "- Tables like `sales`, `customers`, `care_plan`, `call_logs` → "mysql"\n"
+      "- Tables like `products` → "postgres"\n"
+
+      "**HUMAN DDL COMMANDS → SAFE EXECUTION:**\n"
+    "- For “create copy of table” (or "duplicate"/"copy" table): \n"
+      "{"tool": "safe_sql_executor", "action": "copy_table", "args": {"source_table": "<src>", "dest_table": "<dest>"}}\n"
+    "- For “create table X like Y”:\n"
+      "{"tool": "safe_sql_executor", "action": "create_like", "args": {"source_table": "<Y>", "dest_table": "<X>"}}\n"
+    "- For “drop table Z”:\n"
+      "{"tool": "safe_sql_executor", "action": "drop_table", "args": {"source_table": "Z"}}\n"
+
+    "**IF YOU ARE UNSURE:**\n"
+    "- Prefer {"tool": null, "action": "chat", "args": {}}  rather than choosing the wrong tool.\n"
+
+    
     "**ENHANCED CARE PLAN FIELD MAPPING:**\n"
     "The CarePlan table now includes comprehensive real-world fields:\n"
     "- Base: 'actual_release_date', 'name_of_youth', 'race_ethnicity', 'medi_cal_id_number'\n"
@@ -1016,6 +863,7 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "- Support: 'family_children', 'emergency_contacts', 'service_referrals', 'court_dates'\n"
     "- Equipment: 'home_modifications', 'durable_medical_equipment'\n"
     "- Metadata: 'care_plan_type', 'status', 'notes'\n\n"
+    "patients can also be called prisoners\n"
 
     "**ETL & DISPLAY FORMATTING RULES:**\n"
     "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
@@ -1062,6 +910,8 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name_of_youth = 'John'\"}}\n"
     "   - **Example Query:** 'show patients needing housing assistance'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"housing LIKE '%assistance%' OR housing = 'Homeless'\"}}\n"
+    "   - **Example Query:** 'show prisoners released in last X days'\n"
+    "   - **→ Correct Tool Call:** {"tool": "careplan_crud", "action": "read", "args": {"time_period": X}}\n"
 
     "7. **CARE PLAN TYPE FILTERING:**\n"
     "   - If user asks for 'reentry care plans' or 'general care plans'\n"
@@ -1084,18 +934,21 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
     "   - **Example Query:** 'calls handled by Sarah Chen'\n"
     "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
-)
 
-    # Format conversation context for the prompt
-    context_str = ""
-    if conversation_context:
-        context_str = "Previous conversation context:\n"
-        for i, (prev_query, prev_response) in enumerate(conversation_context[-5:]):
-            context_str += f"User: {prev_query}\nAssistant: {prev_response}\n\n"
-    
+    "10. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
+    "   - For queries like "patients with diabetes", "care plans with name John":\n"
+  "{"tool": "careplan_crud", "action": "read", "args": {"filter_column": "<column>", "filter_value": "<value>"}}\n"
+
+"- For queries like "patients released in recent N days", "last N days", "past N days":\n"
+  "{"tool": "careplan_crud", "action": "read", "args": {"time_period": N}}\n"
+
+"- For general analytics like "summarize care plans", "analyze care plan notes", "show statistics":\n"
+  "{"tool": "careplan_crud", "action": "analyze", "args": {}}\n"
+
+""")
+
     user_prompt = f"""User query: "{query}"
 
-{context_str}
 Analyze the query step by step:
 
 1. What is the PRIMARY INTENT? (product, customer, or sales operation)
@@ -1104,7 +957,6 @@ Analyze the query step by step:
 4. What SPECIFIC COLUMNS are requested? (for read operations - extract into 'columns' parameter)
 5. What FILTER CONDITIONS are specified? (for read operations - extract into 'where_clause' parameter)
 6. What PARAMETERS need to be extracted from the natural language?
-7. CONSIDER PREVIOUS CONVERSATION CONTEXT when the query is vague or refers to previous interactions
 
 ENTITY NAME EXTRACTION GUIDELINES (CRITICAL FOR DELETE/UPDATE):
 - For "delete Widget" → extract "Widget" and put in 'name' parameter
@@ -1142,6 +994,19 @@ Respond with the exact JSON format with properly extracted parameters."""
             except:
                 result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
 
+        if result.get("tool") == "read_only_sql":
+            args = result.setdefault("args", {})
+            if "dialect" not in args:
+                qlow = (args.get("sql","") or "").lower()
+                if any(t in qlow for t in [" products ", " from products", " join products"]):
+                    args["dialect"] = "postgres"
+                else:
+                    args["dialect"] = "mysql"
+            result["args"] = args
+
+        if result.get("action") == "chat":
+            return result
+            
         # Normalize action names
         if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
             result["action"] = "read"
@@ -1186,6 +1051,14 @@ Respond with the exact JSON format with properly extracted parameters."""
                 email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
                 if email_match:
                     args["new_email"] = email_match.group(1)
+            
+            if result.get("tool") == "careplan_crud" and result.get("action") == "read":
+                if "time_period" not in result.get("args", {}):
+                    import re
+                    match = re.search(r"(last|recent|past)\s+(\d+)\s+days", user_query.lower())
+                    if match:
+                        days = int(match.group(2))
+                        result["args"]["time_period"] = days
             
             result["args"] = args
 
@@ -1691,415 +1564,79 @@ if application == "MCP Application":
     # ========== 2. RENDER VISUALIZATIONS ==========
     if st.session_state.visualizations:
         st.markdown("---")
-        st.markdown("""
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h2>📊 Interactive Visualizations</h2>
-            <div id="viz-controls"></div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Add a button to clear all visualizations
-        with st.container():
-            if st.button("🗑️ Clear All Visualizations", key="clear_all_top"):
-                st.session_state.visualizations = []
-                st.rerun()
+        st.markdown("## 📊 Interactive Visualizations")
 
-        # Create a floating visualization panel container and fixed code container
-        st.markdown("""
-        <!-- Floating Visualization Panel -->
-        <div id="floating-viz-container" style="position: fixed; right: 20px; top: 80px; width: 80%; max-width: 1200px; z-index: 1000; 
-            background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); display: none;">
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; 
-                background: #f9f9f9; border-bottom: 1px solid #e6e6e6; border-radius: 12px 12px 0 0;">
-                <div style="font-weight: 600; color: #333; font-size: 16px;">
-                    <span style="color: #4286f4;">📊</span> Visualization Panel
-                </div>
-                <div>
-                    <button id="minimize-viz" style="background: none; border: none; cursor: pointer; font-size: 18px;">_</button>
-                    <button id="close-viz" style="background: none; border: none; cursor: pointer; font-size: 18px; margin-left: 8px;">×</button>
-                </div>
-            </div>
-            <div id="floating-viz-content" style="padding: 20px; max-height: 80vh; overflow-y: auto;">
-            </div>
-        </div>
-        
-        <!-- Fixed Code Container -->
-        <div id="fixed-code-container">
-            <div class="code-header">
-                <div style="font-weight: 600; color: #333; font-size: 16px;">
-                    <span style="color: #4286f4;">💻</span> <span id="fixed-code-title">Code Section</span>
-                </div>
-                <div>
-                    <button id="minimize-code" style="background: none; border: none; cursor: pointer; font-size: 18px;">_</button>
-                    <button id="close-code" style="background: none; border: none; cursor: pointer; font-size: 18px; margin-left: 8px;">×</button>
-                </div>
-            </div>
-            <div id="fixed-code-content" class="code-content">
-            </div>
-        </div>
-        
-        <script>
-        // JavaScript to control the floating panels
-        document.addEventListener('DOMContentLoaded', function() {
-            // Visualization panel controls
-            const floatingVizContainer = document.getElementById('floating-viz-container');
-            const minimizeVizBtn = document.getElementById('minimize-viz');
-            const closeVizBtn = document.getElementById('close-viz');
-            
-            // Code panel controls
-            const fixedCodeContainer = document.getElementById('fixed-code-container');
-            const minimizeCodeBtn = document.getElementById('minimize-code');
-            const closeCodeBtn = document.getElementById('close-code');
-            
-            // Show the visualization container initially
-            floatingVizContainer.style.display = 'block';
-            
-            // Visualization panel minimize button functionality
-            minimizeVizBtn.addEventListener('click', function() {
-                const content = document.getElementById('floating-viz-content');
-                if (content.style.display === 'none') {
-                    content.style.display = 'block';
-                    minimizeVizBtn.textContent = '_';
-                } else {
-                    content.style.display = 'none';
-                    minimizeVizBtn.textContent = '□';
-                }
-            });
-            
-            // Visualization panel close button functionality
-            closeVizBtn.addEventListener('click', function() {
-                floatingVizContainer.style.display = 'none';
-            });
-            
-            // Code panel minimize button functionality
-            minimizeCodeBtn.addEventListener('click', function() {
-                const content = document.getElementById('fixed-code-content');
-                if (content.style.display === 'none') {
-                    content.style.display = 'block';
-                    minimizeCodeBtn.textContent = '_';
-                } else {
-                    content.style.display = 'none';
-                    minimizeCodeBtn.textContent = '□';
-                }
-            });
-            
-            // Code panel close button functionality
-            closeCodeBtn.addEventListener('click', function() {
-                fixedCodeContainer.style.display = 'none';
-            });
-            
-            // Make the visualization panel draggable
-            makeElementDraggable(floatingVizContainer);
-            
-            // Make the code panel draggable
-            makeElementDraggable(fixedCodeContainer);
-            
-            // Function to make an element draggable
-            function makeElementDraggable(element) {
-                let isDragging = false;
-                let offsetX, offsetY;
-                
-                const header = element.querySelector('.code-header') || element.querySelector('div');
-                header.addEventListener('mousedown', function(e) {
-                    isDragging = true;
-                    offsetX = e.clientX - element.getBoundingClientRect().left;
-                    offsetY = e.clientY - element.getBoundingClientRect().top;
-                    
-                    // Prevent text selection during drag
-                    e.preventDefault();
-                });
-                
-                document.addEventListener('mousemove', function(e) {
-                    if (isDragging && e.target.closest('#' + element.id)) {
-                        element.style.left = (e.clientX - offsetX) + 'px';
-                        element.style.top = (e.clientY - offsetY) + 'px';
-                        element.style.right = 'auto';
-                        element.style.bottom = 'auto';
-                    }
-                });
-                
-                document.addEventListener('mouseup', function() {
-                    isDragging = false;
-                });
-            }
-            
-            // Function to show code in the fixed code container
-            window.showCodeInFixedPanel = function(codeContent, title) {
-                const codeContainer = document.getElementById('fixed-code-container');
-                const codeContentElement = document.getElementById('fixed-code-content');
-                const codeTitleElement = document.getElementById('fixed-code-title');
-                
-                // Set the title and content
-                codeTitleElement.textContent = title || 'Code Section';
-                codeContentElement.innerHTML = codeContent;
-                
-                // Show the container
-                codeContainer.style.display = 'block';
-                codeContentElement.style.display = 'block';
-                minimizeCodeBtn.textContent = '_';
-            };
-        });
-        </script>
-        """, unsafe_allow_html=True)
-        
         for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
-            # Create a Claude-desktop-like visualization container
-            with st.container():
-                # Create a modern, clean header for the visualization
-                st.markdown(f"""
-                <div class="viz-item" data-viz-id="{i}" style="margin-bottom: 20px; border: 1px solid #e6e6e6; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
-                    <div style="background: #f9f9f9; padding: 12px 18px; border-bottom: 1px solid #e6e6e6; display: flex; justify-content: space-between; align-items: center;">
-                        <div style="font-weight: 600; color: #333; font-size: 16px; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-                            <span style="color: #4286f4;">📊</span> {user_query[:50] + '...' if len(user_query) > 50 else user_query}
-                        </div>
-                        <button class="open-in-panel-btn" data-viz-id="{i}" style="background: #4286f4; color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px;">Open in Panel</button>
-                    </div>
-                    <div style="padding: 20px; background: white;">
-                """, unsafe_allow_html=True)
-                
-                # Create two columns for the visualization layout - Claude Desktop style
-                col1, col2 = st.columns([1, 1])
-                
+            with st.expander(
+                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=True):
+
+            # Create tabs with Code first, then Visualization
+                tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
+
+                with tab1:
+                    st.markdown("**Generated Code**")
+
                 # Initialize streaming state for this visualization if not exists
-                stream_key = f"stream_complete_{i}"
-                if stream_key not in st.session_state:
-                    st.session_state[stream_key] = False
-                
-                # Code section (left column)
-                with col1:
-                    st.markdown(f"""
-                    <div class="code-section" data-viz-id="{i}" style="border-right: 1px solid #e6e6e6; padding-right: 15px; height: 100%;">
-                        <div style="font-weight: 600; margin-bottom: 10px; color: #333; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px;">
-                            <span style="color: #4286f4;">💻</span> Generated Code
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Create placeholder for streaming effect
+                    stream_key = f"stream_complete_{i}"
+                    if stream_key not in st.session_state:
+                        st.session_state[stream_key] = False
+
+                # Create placeholder for streaming effect
                     code_placeholder = st.empty()
-                    
+
                     if not st.session_state[stream_key]:
-                        # Streaming effect - show code character by character
+                    # Streaming effect - show code character by character
                         import time
-                        
-                        # Show streaming indicator first
+
+                    # Show streaming indicator first
                         with code_placeholder.container():
                             st.info("🔄 Generating code...")
-                        
-                        # Small delay to show the loading message
+
+                    # Small delay to show the loading message
                         time.sleep(0.5)
-                        
-                        # Stream the code with a typewriter effect
+
+                    # Stream the code
                         streamed_code = ""
                         for j, char in enumerate(viz_code):
                             streamed_code += char
-                            # Update every few characters for better performance
+                        # Update every 5-10 characters for better performance
                             if j % 8 == 0 or j == len(viz_code) - 1:
                                 code_placeholder.code(streamed_code, language="html")
-                                time.sleep(0.02)  # Slightly faster for a more responsive feel
-                        
-                        # Mark streaming as complete
+                                time.sleep(0.03)  # Adjust speed as needed
+
+                    # Mark streaming as complete
                         st.session_state[stream_key] = True
-                        
-                        # Force a rerun to show the complete state
+
+                    # Force a rerun to show the complete state
                         st.rerun()
                     else:
-                        # Show complete code immediately
+                    # Show complete code immediately
                         code_placeholder.code(viz_code, language="html")
-                    
-                    # Adding copy button, replay button, and fixed code button (only show when streaming is complete)
+
+                # Adding copy button (only show when streaming is complete)
                     if st.session_state[stream_key]:
-                        col1_1, col1_2, col1_3 = st.columns([1, 1, 1])
-                        with col1_1:
-                            if st.button("📋 Copy Code", key=f"copy_{i}"):
-                                st.session_state.copied_code = viz_code
-                                st.success("Code copied to clipboard!")
-                        with col1_2:
-                            if st.button("🔄 Replay Generation", key=f"replay_{i}"):
-                                st.session_state[stream_key] = False
-                                st.rerun()
-                        with col1_3:
-                            if st.button("📌 Pin Code", key=f"pin_{i}"):
-                                # Add JavaScript to show code in fixed panel
-                                escaped_code = viz_code.replace('\\', '\\\\').replace('`', '\\`').replace("'", "\\'").replace('"', '\\"')
-                                escaped_title = user_query[:50] + '...' if len(user_query) > 50 else user_query
-                                st.markdown(f"""
-                                <script>
-                                    document.addEventListener('DOMContentLoaded', function() {{
-                                        if (window.showCodeInFixedPanel) {{
-                                            window.showCodeInFixedPanel(`{escaped_code}`, '{escaped_title}');
-                                        }}
-                                    }});
-                                </script>
-                                """, unsafe_allow_html=True)
-                
-                # Visualization section (right column)
-                with col2:
-                    st.markdown(f"""
-                    <div class="viz-section" data-viz-id="{i}" style="padding-left: 15px; height: 100%;">
-                        <div style="font-weight: 600; margin-bottom: 10px; color: #333; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px;">
-                            <span style="color: #4286f4;">📈</span> Interactive Visualization
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Use a container with fixed height for the visualization
+                        if st.button("📋 Copy Code", key=f"copy_{i}"):
+                            st.session_state.copied_code = viz_code
+                            st.success("Code copied to clipboard!")
+
+                    # Add reset streaming button for demo purposes
+                        if st.button("🔄 Replay Code Generation", key=f"replay_{i}"):
+                            st.session_state[stream_key] = False
+                            st.rerun()
+
+                with tab2:
+                    st.markdown("**Interactive Visualization**")
+                # Use a container with fixed height
                     with st.container():
-                        # Add a subtle loading effect before showing the visualization
-                        if not st.session_state[stream_key]:
-                            st.info("Preparing visualization...")
-                        else:
-                            # Render the visualization with a fixed height
-                            components.html(viz_html, height=400, scrolling=True)
-                
-                # Close the container div
-                st.markdown("</div></div>", unsafe_allow_html=True)
-                
-                # Add a horizontal line after each visualization
-                st.markdown("<hr style='margin: 30px 0; border: none; height: 1px; background: #e0e0e0;'>", unsafe_allow_html=True)
+                        components.html(viz_html, height=400, scrolling=True)
 
         if st.button("🧹 Clear All Visualizations", key="clear_viz"):
             st.session_state.visualizations = []
-            # Clear all streaming states
+        # Clear all streaming states
             keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
             for key in keys_to_remove:
                 del st.session_state[key]
             st.rerun()
-            
-        # Add JavaScript to handle the 'Open in Panel' button functionality
-        st.markdown("""
-        <script>
-        // Function to handle opening visualizations in the floating panel
-        document.addEventListener('DOMContentLoaded', function() {
-            // Function to initialize the floating panel
-            function initFloatingPanel() {
-                // Create a two-column layout in the floating panel
-                const floatingContent = document.getElementById('floating-viz-content');
-                if (floatingContent) {
-                    floatingContent.innerHTML = `
-                        <div style="display: flex; flex-direction: row; height: 100%;">
-                            <div id="floating-code" style="flex: 1; border-right: 1px solid #e6e6e6; padding-right: 15px; max-height: 70vh; overflow-y: auto;"></div>
-                            <div id="floating-viz" style="flex: 1; padding-left: 15px; max-height: 70vh; overflow-y: auto;"></div>
-                        </div>
-                    `;
-                }
-            }
-            
-            // Initialize the floating panel
-            initFloatingPanel();
-            
-            // Add click event listeners to all 'Open in Panel' buttons
-            document.querySelectorAll('.open-in-panel-btn').forEach(button => {
-                button.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    const vizId = this.getAttribute('data-viz-id');
-                    
-                    // Get the code section
-                    const codeSection = document.querySelector(`.code-section[data-viz-id="${vizId}"]`);
-                    const codeContent = codeSection ? codeSection.closest('.stColumn').innerHTML : '';
-                    
-                    // Get the visualization section
-                    const vizSection = document.querySelector(`.viz-section[data-viz-id="${vizId}"]`);
-                    const vizContent = vizSection ? vizSection.closest('.stColumn').innerHTML : '';
-                    
-                    // Get the visualization title
-                    const vizItem = document.querySelector(`.viz-item[data-viz-id="${vizId}"]`);
-                    const vizTitle = vizItem ? vizItem.querySelector('div:nth-child(1) div').innerText : 'Visualization';
-                    
-                    // Update the floating panel title
-                    const panelTitle = document.querySelector('#floating-viz-container > div:first-child > div:first-child');
-                    if (panelTitle) {
-                        panelTitle.innerHTML = `<span style="color: #4286f4;">📊</span> ${vizTitle}`;
-                    }
-                    
-                    // Update the floating panel content
-                    const floatingCode = document.getElementById('floating-code');
-                    const floatingViz = document.getElementById('floating-viz');
-                    
-                    if (floatingCode && floatingViz) {
-                        floatingCode.innerHTML = codeContent;
-                        floatingViz.innerHTML = vizContent;
-                        
-                        // Show the floating panel
-                        const floatingContainer = document.getElementById('floating-viz-container');
-                        floatingContainer.style.display = 'block';
-                    }
-                });
-            });
-            
-            // Add a button to show the floating panel in the viz controls area
-                const vizControls = document.getElementById('viz-controls');
-                if (vizControls) {
-                    const showPanelBtn = document.createElement('button');
-                    showPanelBtn.textContent = 'Show Visualization Panel';
-                    showPanelBtn.style.background = '#4286f4';
-                    showPanelBtn.style.color = 'white';
-                    showPanelBtn.style.border = 'none';
-                    showPanelBtn.style.borderRadius = '4px';
-                    showPanelBtn.style.padding = '6px 12px';
-                    showPanelBtn.style.cursor = 'pointer';
-                    showPanelBtn.style.fontSize = '14px';
-                    showPanelBtn.style.marginRight = '10px';
-                    
-                    showPanelBtn.addEventListener('click', function() {
-                        const floatingContainer = document.getElementById('floating-viz-container');
-                        floatingContainer.style.display = 'block';
-                    });
-                    
-                    vizControls.appendChild(showPanelBtn);
-                    
-                    // Add a button to show the fixed code container
-                    const showCodeBtn = document.createElement('button');
-                    showCodeBtn.textContent = 'Show Code Panel';
-                    showCodeBtn.style.background = '#4286f4';
-                    showCodeBtn.style.color = 'white';
-                    showCodeBtn.style.border = 'none';
-                    showCodeBtn.style.borderRadius = '4px';
-                    showCodeBtn.style.padding = '6px 12px';
-                    showCodeBtn.style.cursor = 'pointer';
-                    showCodeBtn.style.fontSize = '14px';
-                    showCodeBtn.style.marginRight = '10px';
-                    
-                    showCodeBtn.addEventListener('click', function() {
-                        const codeContainer = document.getElementById('fixed-code-container');
-                        codeContainer.style.display = 'block';
-                    });
-                    
-                    vizControls.appendChild(showCodeBtn);
-                
-                // Add a button to toggle compact mode for all visualizations
-                const compactModeBtn = document.createElement('button');
-                compactModeBtn.textContent = 'Toggle Compact Mode';
-                compactModeBtn.style.background = '#4286f4';
-                compactModeBtn.style.color = 'white';
-                compactModeBtn.style.border = 'none';
-                compactModeBtn.style.borderRadius = '4px';
-                compactModeBtn.style.padding = '6px 12px';
-                compactModeBtn.style.cursor = 'pointer';
-                compactModeBtn.style.fontSize = '14px';
-                
-                compactModeBtn.addEventListener('click', function() {
-                    // Toggle compact mode for all visualization items
-                    document.querySelectorAll('.viz-item').forEach(item => {
-                        const contentDiv = item.querySelector('div:nth-child(2)');
-                        if (contentDiv) {
-                            if (contentDiv.style.display === 'none') {
-                                contentDiv.style.display = 'block';
-                                item.style.marginBottom = '20px';
-                            } else {
-                                contentDiv.style.display = 'none';
-                                item.style.marginBottom = '5px';
-                            }
-                        }
-                    });
-                });
-                
-                vizControls.appendChild(compactModeBtn);
-            }
-        });
-        </script>
-        """, unsafe_allow_html=True)
-
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     st.markdown('<div class="sticky-chatbar"><div class="chatbar-claude">', unsafe_allow_html=True)
     with st.form("chatbar_form", clear_on_submit=True):
@@ -2259,7 +1796,7 @@ if application == "MCP Application":
                 viz_data = raw["result"]
             
             # Generate visualization for read operations with data
-            if action in ["read", "analyze"]and viz_data and (
+            if action == "read" and viz_data and (
                 (isinstance(viz_data, list) and len(viz_data) > 0) or 
                 (isinstance(viz_data, dict) and len(viz_data) > 0)
             ):
@@ -2309,25 +1846,6 @@ if application == "MCP Application":
                 "user_query": user_query,  # Added user_query to the message
             }
             st.session_state.messages.append(assistant_message)
-            
-            # Store conversation context for future reference
-            # This maintains a history of user queries and assistant responses
-            # to provide context for follow-up questions and maintain conversation continuity
-            if fmt == "text":
-                # For simple text responses, store the query and response directly
-                st.session_state.conversation_context.append((user_query, reply))
-            elif fmt == "sql_crud" and isinstance(reply, dict) and "result" in reply:
-                # For SQL operations, generate a natural language response to store in context
-                # This makes the context more useful for future LLM interactions
-                llm_response = generate_llm_response(reply, p.get("action"), p.get("tool"), user_query)
-                st.session_state.conversation_context.append((user_query, llm_response))
-            
-            # Keep only the last 10 conversation pairs to limit context size
-            # This prevents the context from becoming too large while maintaining
-            # enough history for meaningful conversation continuity
-            if len(st.session_state.conversation_context) > 10:
-                st.session_state.conversation_context = st.session_state.conversation_context[-10:]
-                
         st.rerun()  # Rerun so chat output appears
 
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
@@ -2384,4 +1902,3 @@ with st.expander("🔧 ETL Functions & Examples"):
     - **"update price of Gadget to 25"** - Updates Gadget price to $25
     - **"change email of Bob to bob@new.com"** - Updates Bob's email
     """)
-
