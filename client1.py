@@ -1680,6 +1680,12 @@ if application == "MCP Application":
                 """,
                 unsafe_allow_html=True,
             )
+    if "visualizations" in st.session_state and st.session_state.visualizations:
+        st.markdown("### Visualizations")
+        for i, viz in enumerate(st.session_state.visualizations):
+            expanded = (i == len(st.session_state.visualizations) - 1)
+            with st.expander(f"Visualization {i+1}", expanded=expanded):
+                components.html(viz, height=500, scrolling=True)
     st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
 
     # ========== 2. RENDER VISUALIZATIONS ==========
