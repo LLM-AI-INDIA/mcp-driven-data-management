@@ -1,4 +1,3 @@
-import pandas as pd
 import os
 import pyodbc
 import psycopg2
@@ -314,6 +313,8 @@ def seed_databases():
          (3, 3, 3, 24.99, 74.97)]
     )
 
+    # ... earlier part of seed_databases ...
+
     sql_cur.execute("""
     CREATE TABLE IF NOT EXISTS CarePlan (
         ID INT AUTO_INCREMENT PRIMARY KEY,
@@ -335,34 +336,37 @@ def seed_databases():
     );
     """)
 
-    df = pd.read_csv("output.tsv", sep="\t")
-    insert_sql = """
-                INSERT INTO CarePlan (
-                    ActualReleaseDate, NameOfYouth, RaceEthnicity, MediCalID,
-                    ResidentialAddress, Telephone, MediCalHealthPlan, HealthScreenings,
-                    HealthAssessments, ChronicConditions, PrescribedMedications,
-                    Notes, CarePlanNotes
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """
+    import csv
 
-    for _, row in df.iterrows():
-        sql_cur.execute(insert_sql, (
-        row.get('ActualReleaseDate'),
-        row.get('NameOfYouth'),
-        row.get('RaceEthnicity'),
-        row.get('MediCalID'),
-        row.get('ResidentialAddress'),
-        row.get('Telephone'),
-        row.get('MediCalHealthPlan'),
-        row.get('HealthScreenings'),
-        row.get('HealthAssessments'),
-        row.get('ChronicConditions'),
-        row.get('PrescribedMedications'),
-        row.get('Notes'),
-        row.get('CarePlanNotes')
-        ))
+    care_plan_data = []
+    tsv_path = os.path.join(os.path.dirname(__file__), "output.tsv")
+    with open(tsv_path, "r", encoding="utf-8") as tsvfile:
+        reader = csv.DictReader(tsvfile, delimiter="\t")
+        for row in reader:
+            care_plan_data.append((
+                row["ActualReleaseDate"],
+                row["NameOfYouth"],
+                row["RaceEthnicity"],
+                row["MediCalID"],
+                row["ResidentialAddress"],
+                row["Telephone"],
+                row["MediCalHealthPlan"],
+                row["HealthScreenings"],
+                row["HealthAssessments"],
+                row["ChronicConditions"],
+                row["PrescribedMedications"],
+                row["Notes"],
+                row["CarePlanNotes"]
+            ))
 
+    sql_cur.executemany("""
+        INSERT INTO CarePlan (ActualReleaseDate, NameOfYouth, RaceEthnicity, MediCalID, ResidentialAddress, 
+                             Telephone, MediCalHealthPlan, HealthScreenings, HealthAssessments, 
+                             ChronicConditions, PrescribedMedications, Notes, CarePlanNotes
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, care_plan_data)
 
+    # ... remainder of seed_databases continues unchanged ...
 
     sql_cur.execute("""
         CREATE TABLE IF NOT EXISTS CallLogs (
@@ -672,104 +676,6 @@ def find_product_by_name(name: str) -> dict:
 
     except Exception as e:
         return {"found": False, "error": f"Database error: {str(e)}"}
-
-
-
-@mcp.tool()
-async def read_only_sql(
-    operation: str = "execute",
-    dialect: str = "mysql",      # 'mysql' | 'postgres'
-    sql: str = "",
-    max_rows: int = 200
-) -> dict:
-    """
-    Execute a read-only SELECT against a configured database.
-    Blocks any non-SELECT statements.
-    """
-    import re
-
-    if not sql or not isinstance(sql, str):
-        return {"sql": None, "result": "❌ Provide a SQL string."}
-
-    q = sql.strip().rstrip(";")
-
-    # allow only single SELECT statement
-    if not re.match(r"(?is)^\s*select\b", q):
-        return {"sql": None, "result": "❌ Only SELECT is allowed in read_only_sql."}
-    if re.search(r"(?is)\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|exec|call|merge)\b", q):
-        return {"sql": None, "result": "❌ Only SELECT is allowed in read_only_sql."}
-
-    try:
-        if dialect == "mysql":
-            conn = get_mysql_conn()
-            cur = conn.cursor(dictionary=True)
-            cur.execute(q)
-            rows = cur.fetchmany(max_rows)
-            result = rows
-        elif dialect == "postgres":
-            conn = get_pg_conn()
-            cur = conn.cursor()
-            cur.execute(q)
-            rows = cur.fetchmany(max_rows)
-            cols = [d[0] for d in cur.description]
-            result = [dict(zip(cols, r)) for r in rows]
-        else:
-            return {"sql": q, "result": f"❌ Unknown dialect '{dialect}'. Use 'mysql' or 'postgres'."}
-        return {"sql": q, "result": result}
-    except Exception as e:
-        return {"sql": q, "result": f"❌ SQL error: {e}"}
-    finally:
-        try:
-            conn.close()
-        except:
-            pass
-
-
-@mcp.tool()
-async def safe_sql_executor(operation: str, source_table: str = None, dest_table: str = None) -> dict:
-    """
-    Safe helper for table-level DDL:
-    - operation: 'copy_table', 'create_like', 'drop_table'
-    """
-    conn = get_mysql_conn()
-    cur = conn.cursor()
-    try:
-        if operation == "copy_table":
-            if not source_table or not dest_table:
-                return {"sql": None, "result": "❌ source_table and dest_table required"}
-            sql = f"CREATE TABLE `{dest_table}` LIKE `{source_table}`;"
-            cur.execute(sql)
-            cur.execute(f"INSERT INTO `{dest_table}` SELECT * FROM `{source_table}`;")
-            conn.commit()
-            return {"sql": sql, "result": f"✅ Table `{dest_table}` created as copy of `{source_table}`."}
-
-        if operation == "create_like":
-            if not source_table or not dest_table:
-                return {"sql": None, "result": "❌ source_table and dest_table required"}
-            sql = f"CREATE TABLE `{dest_table}` LIKE `{source_table}`;"
-            cur.execute(sql)
-            conn.commit()
-            return {"sql": sql, "result": f"✅ Table `{dest_table}` created LIKE `{source_table}`."}
-
-        if operation == "drop_table":
-            if not source_table:
-                return {"sql": None, "result": "❌ source_table required"}
-            # extra safety: disallow dropping core tables
-            if source_table.lower() in ("customers", "careplan", "sales", "calllogs", "productscache"):
-                return {"sql": None, "result": f"❌ Dropping `{source_table}` is not allowed."}
-            sql = f"DROP TABLE IF EXISTS `{source_table}`;"
-            cur.execute(sql)
-            conn.commit()
-            return {"sql": sql, "result": f"✅ Table `{source_table}` dropped."}
-
-        return {"sql": None, "result": f"❌ Unknown operation {operation}"}
-    except Exception as e:
-        return {"sql": None, "result": f"❌ SQL error: {e}"}
-    finally:
-        conn.close()
-
-
-
 
 
 @mcp.tool()
@@ -1466,30 +1372,18 @@ async def sales_crud(
     else:
         return {"sql": None, "result": f"❌ Unknown operation '{operation}'."}
 
-from datetime import datetime, timedelta
-from collections import Counter
-import re
-from typing import Any
 
 @mcp.tool()
 async def careplan_crud(
-    operation: str,
-    columns: str = None,
-    where_clause: str = None,
-    time_period: int = None,  # ✅ New param for recent N days
-    limit: int = None,
-    care_plan_type: str = None,
-    status: str = None
+        operation: str,
+        columns: str = None,
+        where_clause: str = None,
+        limit: int = None,
+        care_plan_type: str = None,
+        status: str = None
 ) -> Any:
-    """
-    Handles CarePlan data for read and analysis operations.
-    Supports:
-    - Read with optional columns, where_clause, time_period, limit
-    - Analyze for stats and CarePlanNotes summary
-    """
-
-    if operation not in ["read", "analyze"]:
-        return {"sql": None, "result": "❌ Only 'read' and 'analyze' operations are supported for care plans."}
+    if operation != "read":
+        return {"sql": None, "result": "❌ Only 'read' operation is supported for care plans."}
 
     conn = get_mysql_conn()
     cur = conn.cursor()
@@ -1503,68 +1397,19 @@ async def careplan_crud(
         "residential_address": "ResidentialAddress",
         "telephone": "Telephone",
         "medi_cal_health_plan": "MediCalHealthPlan",
+
         "health_screenings": "HealthScreenings",
         "health_assessments": "HealthAssessments",
         "chronic_conditions": "ChronicConditions",
         "prescribed_medications": "PrescribedMedications",
+
         "notes": "Notes",
         "careplan_notes": "CarePlanNotes",
+
         "created_at": "CreatedAt",
         "updated_at": "UpdatedAt"
     }
 
-    # ✅ ANALYZE OPERATION
-    if operation == "analyze":
-        try:
-            # Total count
-            cur.execute("SELECT COUNT(*) FROM CarePlan;")
-            total = cur.fetchone()[0]
-
-            # Breakdown by RaceEthnicity
-            cur.execute("""
-                SELECT RaceEthnicity, COUNT(*) 
-                FROM CarePlan 
-                GROUP BY RaceEthnicity 
-                ORDER BY COUNT(*) DESC 
-                LIMIT 10;
-            """)
-            by_race = cur.fetchall()
-
-            # Breakdown by ChronicConditions
-            cur.execute("""
-                SELECT ChronicConditions, COUNT(*) 
-                FROM CarePlan 
-                GROUP BY ChronicConditions 
-                ORDER BY COUNT(*) DESC 
-                LIMIT 10;
-            """)
-            chronic = cur.fetchall()
-
-            # ✅ Analyze CarePlanNotes
-            cur.execute("SELECT CarePlanNotes FROM CarePlan WHERE CarePlanNotes IS NOT NULL;")
-            notes_rows = cur.fetchall()
-            notes_text = " ".join([row[0] for row in notes_rows if row[0]])
-
-            # Basic keyword frequency (ignore words <4 letters)
-            words = re.findall(r'\b[a-zA-Z]{4,}\b', notes_text.lower())
-            common_words = Counter(words).most_common(20)
-
-            conn.close()
-            return {
-                "sql": None,
-                "result": {
-                    "total": total,
-                    "by_race": by_race,
-                    "top_chronic_conditions": chronic,
-                    "careplan_notes_summary": common_words
-                }
-            }
-        except Exception as e:
-            conn.close()
-            return {"sql": None, "result": f"❌ Analysis Error: {str(e)}"}
-
-    # ✅ READ OPERATION
-    # Select columns
     selected_columns = []
     column_aliases = []
 
@@ -1573,6 +1418,7 @@ async def careplan_crud(
         if raw_cols.startswith("*"):
             selected_columns = list(available_columns.values())
             column_aliases = list(available_columns.keys())
+
             exclusions = [col.strip().replace("-", "").replace(" ", "_")
                           for col in raw_cols.split(",") if col.startswith("-")]
             selected_columns, column_aliases = zip(*[
@@ -1608,25 +1454,11 @@ async def careplan_crud(
     sql = f"SELECT {select_clause} FROM CarePlan WHERE 1=1"
     query_params = []
 
-    # ✅ Apply time filter
-    if time_period and isinstance(time_period, int):
-        sql += " AND ActualReleaseDate >= %s"
-        recent_date = (datetime.now() - timedelta(days=time_period)).date()
-        query_params.append(recent_date)
-
-    # ✅ Apply custom where clause
     if where_clause and where_clause.strip():
         sql += f" AND {where_clause}"
 
     if limit:
         sql += f" LIMIT {limit}"
-
-    # ✅ Fill NULL dates with current date (optional)
-    cur.execute("SELECT COUNT(*) FROM CarePlan WHERE ActualReleaseDate IS NULL;")
-    null_count = cur.fetchone()[0]
-    if null_count > 0:
-        cur.execute("UPDATE CarePlan SET ActualReleaseDate = %s WHERE ActualReleaseDate IS NULL;", (datetime.now().date(),))
-        conn.commit()
 
     try:
         cur.execute(sql, query_params)
