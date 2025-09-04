@@ -1441,15 +1441,12 @@ async def careplan_crud(
         "residential_address": "ResidentialAddress",
         "telephone": "Telephone",
         "medi_cal_health_plan": "MediCalHealthPlan",
-
         "health_screenings": "HealthScreenings",
         "health_assessments": "HealthAssessments",
         "chronic_conditions": "ChronicConditions",
         "prescribed_medications": "PrescribedMedications",
-
         "notes": "Notes",
         "careplan_notes": "CarePlanNotes",
-
         "created_at": "CreatedAt",
         "updated_at": "UpdatedAt"
     }
@@ -1499,6 +1496,9 @@ async def careplan_crud(
     query_params = []
 
     if where_clause and where_clause.strip():
+        # Map the column names in the where_clause to the actual column names in the database
+        for col_alias, db_col in available_columns.items():
+            where_clause = where_clause.replace(col_alias, db_col)
         sql += f" AND {where_clause}"
 
     if limit:
@@ -1525,7 +1525,6 @@ async def careplan_crud(
         results.append(row_dict)
 
     return {"sql": sql, "result": results}
-
 
 @mcp.tool()
 async def calllogs_crud(
