@@ -28,7 +28,7 @@ The system follows a layered architecture:
 
     - **Client Layer** (client1.py - **Streamlit UI**): The user-facing web application for natural language interaction.
 
-    - **Application Layer** (Server_Tools1.py - **FastMCP Server**): The core orchestration layer that hosts database interaction tools, integrates with the LLM, and manages data flow between the client and databases.
+    - **Application Layer** (main1.py - **FastMCP Server**): The core orchestration layer that hosts database interaction tools, integrates with the LLM, and manages data flow between the client and databases.
 
     - **AI/LLM Layer** (**OpenAI API**): An external Large Language Model responsible for understanding user intent, selecting tools, extracting arguments, and generating natural language responses.
 
@@ -53,7 +53,7 @@ The system follows a layered architecture:
           v
 +-------------------+
 |  Application Layer|
-| (Server_Tools1.py)|
+| (main1.py)|
 |  (FastMCP Server) |
 +---------+---------+
           |  ^
@@ -114,7 +114,7 @@ The system follows a layered architecture:
     pip (Python package installer)
 
 **Environment Variables (.env)**
-Create a .env file in the root directory of your project (where Server_Tools1.py and client1.py reside) and populate it with your database credentials and API keys:
+Create a .env file in the root directory of your project (where main1.py and client1.py reside) and populate it with your database credentials and API keys:
 ```
 # OpenAI API Key for LLM integration
 GROQ_API_KEY=your_api_key
@@ -158,9 +158,9 @@ Go to [Render](render.com) and sign up. Then create a **Web Service**
 
 While setting it up, give your repository's (the one with the server code) public link. 
 
-The server (Server_Tools1.py) hosts the database tools and communicates with the LLM.
+The server (main1.py) hosts the database tools and communicates with the LLM.
 
-```nohup python -u Server_Tools1.py > server.log 2>&1 &```
+```nohup python -u main1.py > server.log 2>&1 &```
 
 This command will:
 
@@ -214,7 +214,7 @@ Sample Prompts:
 
 - **"No Tools Discovered" / LLM Errors:**
 
-        Ensure your Server_Tools1.py is running and accessible at the MCP_SERVER_URL specified in your .env.
+        Ensure your main1.py is running and accessible at the MCP_SERVER_URL specified in your .env.
 
         Verify your GROQ_API_KEY is correct and has sufficient permissions.
 
