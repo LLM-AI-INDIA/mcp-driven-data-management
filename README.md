@@ -26,13 +26,13 @@ This system provides a conversational interface for performing Create, Read, Upd
 
 The system follows a layered architecture:
 
-    - **Client Layer** (client1.py - **Streamlit UI**): The user-facing web application for natural language interaction.
+**Client Layer** (client1.py - **Streamlit UI**): The user-facing web application for natural language interaction.
 
-    - **Application Layer** (main1.py - **FastMCP Server**): The core orchestration layer that hosts database interaction tools, integrates with the LLM, and manages data flow between the client and databases.
+**Application Layer** (main1.py - **FastMCP Server**): The core orchestration layer that hosts database interaction tools, integrates with the LLM, and manages data flow between the client and databases.
 
-    - **AI/LLM Layer** (**OpenAI API**): An external Large Language Model responsible for understanding user intent, selecting tools, extracting arguments, and generating natural language responses.
+**AI/LLM Layer** (**OpenAI API**): An external Large Language Model responsible for understanding user intent, selecting tools, extracting arguments, and generating natural language responses.
 
-    - **Database Layer** (Aiven console & Supabase - **MySQL & PostgreSQL**): The persistent storage for customer, product, and sales data.
+**Database Layer** (Aiven console & Supabase - **MySQL & PostgreSQL**): The persistent storage for customer, product, and sales data.
 
 **Conceptual Diagram:**
 
@@ -124,19 +124,25 @@ MCP_SERVER_URL=http://localhost:8000 # Change for deployment --> it will be the 
 !!!!ADD THE PORT NUMBER AFTER THE URL --->    <url>:8000/
 
 
-# MySQL RDS Configuration
+# MySQL Configuration
 MYSQL_HOST=your_mysql_rds_endpoint
 MYSQL_PORT=3306
 MYSQL_USER=your_mysql_username
 MYSQL_PASSWORD=your_mysql_password
 MYSQL_DB=your_mysql_database_name
 
-# PostgreSQL RDS Configuration
+# PostgreSQL Configuration
 PG_HOST=your_postgresql_rds_endpoint
 PG_PORT=5432
 PG_DB=your_postgresql_database_name
 PG_USER=your_postgresql_username
 PG_PASSWORD=your_postgresql_password
+
+PG_SALES_HOST=your_postgresql_rds_endpoint
+PG_SALES_PORT=5432
+PG_SALES_DB=your_postgresql_database_name
+PG_SALES_USER=your_postgresql_username
+PG_SALES_PASSWORD=your_postgresql_password
 ```
 
 **Database Configuration (AWS RDS)**
@@ -150,7 +156,7 @@ PG_PASSWORD=your_postgresql_password
 
 Navigate to your project directory in the terminal and install the required Python packages:
 
-```pip install fastmcp mysql-connector-python psycopg2-binary groq uvicorn pyodbc streamlit pandas pillow openai fastmcp python-dotenv asyncio langchain_groq langchain_core plotly```
+```pip install fastmcp mysql-connector-python psycopg2-binary groq uvicorn pyodbc streamlit pandas pillow openai fastmcp mcp mcp-server python-dotenv asyncio langchain_groq langchain_core plotly```
 
 **Running the Server**
 
