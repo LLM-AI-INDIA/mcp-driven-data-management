@@ -1868,12 +1868,25 @@ async def calllogs_crud(
         conn.close()
         return {"sql": "", "result": f"Unknown operation '{operation}'."}
 
-
 if __name__ == "__main__":
-    seed_databases()
-    import os
+    import sys, os
+    sys.stderr.write("[MCP] starting server\n"); sys.stderr.flush()
 
-    port = int(os.environ.get("PORT", 8000))
-    mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
+    if os.getenv("SEED_ON_START", "true").lower() != "false":
+        try:
+            seed_databases()
+            sys.stderr.write("[MCP] seeding finished\n"); sys.stderr.flush()
+        except Exception as e:
+            sys.stderr.write(f"[MCP] seeding failed: {e}\n"); sys.stderr.flush()
+
+
+    ##### CODE TO WORK WITH CLAUDE DESKTOP ##### <-- use these lines if you are going to implement it in claude desktop
+    sys.stderr.write("[MCP] entering mcp.run()\n"); sys.stderr.flush()
+    mcp.run(transport="stdio")
+
+    ##### CODE TO WORK WITH CUSTOM DEPLOYMENT##### <-- use these lines if you are going to implement it in custom client
+    #host = os.getenv("HOST", "0.0.0.0")
+    #port = int(os.getenv("PORT", 8000))
+    #mcp.run(transport="streamable-http", host=host)
 
 
